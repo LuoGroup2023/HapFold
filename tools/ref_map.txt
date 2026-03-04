@@ -1,0 +1,4 @@
+ref_contig_1    chr1    hap1
+ref_contig_2    chr1    hap2
+ref_contig_3    chr2    hap1
+...
