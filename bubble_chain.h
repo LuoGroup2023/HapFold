@@ -1152,7 +1152,7 @@ typedef struct
     string hap_sequence;
     vector<uint32_t> hap_path;
     map<uint32_t, uint32_t> node_positions;
-
+    vector<string> catched_contigs;
     bool is_valid;
 } hap_chain_result_t;
 vector<vector<bubble_chain>> bubble_chains;
@@ -1493,7 +1493,7 @@ void build_bubbles(asg_t *g,
             //     if (num % 1000 == 0)
             //         cout << "Now u is: " << g->seq[u / 2].name << std::endl;
             // }
-            if (num > 200000)
+            if (num > 2000000)
             {
 
                 for (int ui = 0; ui < node_stack.size(); ui++)
@@ -1576,6 +1576,111 @@ void Get_bubble(asg_t *g,
         }
     }
     cout << "type3_count: " << type3_count << endl;
+}
+
+vector<set<uint32_t>> find_connected_components_debug_plants(asg_t *g,
+                                                             std::vector<std::set<uint32_t>> &hap_chains,
+                                                             std::vector<std::set<uint32_t>> &filtered_components, int *node_type)
+{
+    vector<bool> visited_real_node(g->n_seq, false); // 只访问真实点 ID（i >> 1）
+    vector<set<uint32_t>> components;
+
+    for (uint32_t i = 0; i < g->n_seq * 2; i++)
+    {
+        uint32_t real_id = i >> 1;
+        // if (visited_real_node[real_id]) continue;
+
+        set<uint32_t> component;
+        stack<uint32_t> s;
+        s.push(i);
+
+        while (!s.empty())
+        {
+            uint32_t u = s.top();
+            s.pop();
+
+            uint32_t uid = u >> 1;
+            if (visited_real_node[uid])
+                continue;
+            visited_real_node[uid] = true;
+
+            // 把正向和反向都加进去
+            component.insert(uid * 2);     // 正向
+            component.insert(uid * 2 + 1); // 反向
+
+            // 出边
+            uint32_t out_deg = asg_arc_n(g, u);
+            asg_arc_t *out_arcs = asg_arc_a(g, u);
+            for (uint32_t j = 0; j < out_deg; j++)
+            {
+                uint32_t v = out_arcs[j].v;
+                if (!visited_real_node[v >> 1])
+                {
+                    s.push(v);
+                }
+            }
+
+            // 入边（反向）
+            uint32_t in_deg = asg_arc_n(g, u ^ 1);
+            asg_arc_t *in_arcs = asg_arc_a(g, u ^ 1);
+            for (uint32_t j = 0; j < in_deg; j++)
+            {
+                uint32_t v = in_arcs[j].v;
+                if (!visited_real_node[v >> 1])
+                {
+                    s.push(v);
+                }
+            }
+        }
+
+        // 计算组件内节点总长度和节点数量
+        uint32_t total_length = 0;
+        for (auto node : component)
+        {
+            total_length += g->seq[node >> 1].len; // 获取节点长度，注意 >> 1
+        }
+        hap_chains.push_back(component);
+    }
+
+    cout << endl;
+    // 打印单倍型链
+    for (size_t i = 0; i < hap_chains.size(); ++i)
+    {
+        std::cout << "Haplotypic chain " << i << " contains nodes: ";
+        for (auto node : hap_chains[i])
+        {
+            std::cout << g->seq[node >> 1].name << " ";
+        }
+        std::cout << std::endl;
+    }
+
+    for (size_t i = 0; i < components.size(); i++)
+    {
+        cout << "Component " << i << " contains nodes: ";
+        vector<string> complex_node_names;
+        int complex_count = 0;
+        for (auto node : components[i])
+        {
+            cout << g->seq[node >> 1].name << " ";
+            if (complex_nodes.count(node))
+            {
+                ++complex_count;
+                complex_node_names.push_back(g->seq[node >> 1].name);
+            }
+        }
+        cout << endl;
+        if (complex_count > 0)
+        {
+            cout << "  >> Component " << i << " has " << complex_count << " complex nodes: ";
+            if (complex_count > 10)
+                complex_components.insert(i);
+            for (const auto &name : complex_node_names)
+                cout << name << " ";
+            cout << endl;
+        }
+    }
+
+    return components;
 }
 
 vector<set<uint32_t>> find_connected_components_debug(asg_t *g,
@@ -1689,11 +1794,15 @@ vector<set<uint32_t>> find_connected_components_debug(asg_t *g,
             hap_chains.push_back(comp);
         }
 
-        else if (type1_2_count < 20 || ratio < 0.4 || (ratio < 0.6 && ratio2 >= 0.1))
+        else if (type1_2_count < 20 || ratio < 0.4 || (ratio < 0.61 && ratio2 >= 0.1))
         {
             // 满足单倍型链条件
             if (avg_degree < 1.4)
                 hap_chains.push_back(comp);
+            else if (ratio2 >= 0.1 && ratio < 0.8)
+            {
+                hap_chains.push_back(comp);
+            }
             else
             {
                 filtered_components.push_back(comp);
@@ -1720,12 +1829,19 @@ vector<set<uint32_t>> find_connected_components_debug(asg_t *g,
     components = std::move(filtered_components);
     cout << endl;
     // 打印单倍型链
+
     for (size_t i = 0; i < hap_chains.size(); ++i)
     {
         std::cout << "Haplotypic chain " << i << " contains nodes: ";
+        int count = 0;
         for (auto node : hap_chains[i])
         {
             std::cout << g->seq[node >> 1].name << " ";
+            count++;
+            if (count > 10)
+            {
+                break;
+            }
         }
         std::cout << std::endl;
     }
@@ -1735,6 +1851,7 @@ vector<set<uint32_t>> find_connected_components_debug(asg_t *g,
         cout << "Component " << i << " contains nodes: ";
         vector<string> complex_node_names;
         int complex_count = 0;
+        int count = 0;
         for (auto node : components[i])
         {
             cout << g->seq[node >> 1].name << " ";
@@ -1742,6 +1859,11 @@ vector<set<uint32_t>> find_connected_components_debug(asg_t *g,
             {
                 ++complex_count;
                 complex_node_names.push_back(g->seq[node >> 1].name);
+                count++;
+                if (count > 10)
+                {
+                    break;
+                }
             }
         }
         cout << endl;
@@ -2627,7 +2749,7 @@ void build_bubbles2(asg_t *g,
                 node_vi_stack.pop_back();
                 continue;
             }
-            if (num > 200000)
+            if (num > 2000000)
             {
 
                 for (int ui = 0; ui < node_stack.size(); ui++)
@@ -3366,11 +3488,11 @@ void sequence_hap_chains(asg_t *g, std::vector<hap_chain_result_t> &chain_result
         if (result.hap_path.empty())
         {
             result.is_valid = false;
-            cerr << "Chain " << chain_idx << ": empty path, marked invalid" << endl;
+            // cerr << "Chain " << chain_idx << ": empty path, marked invalid" << endl;
             continue;
         }
-        cerr << "Processing chain " << chain_idx << " with "
-             << result.hap_path.size() << " nodes" << endl;
+        // cerr << "Processing chain " << chain_idx << " with "
+        //      << result.hap_path.size() << " nodes" << endl;
         string &seq = result.hap_sequence;
         uint32_t current_position = 0;
         for (size_t i = 0; i < result.hap_path.size(); ++i)
@@ -3434,21 +3556,551 @@ void sequence_hap_chains(asg_t *g, std::vector<hap_chain_result_t> &chain_result
     }
 }
 
-void find_all_paths_in_hap_chains(asg_t *g, const vector<set<uint32_t>> &hap_chains, int *node_type)
+// void find_all_paths_in_hap_chains(asg_t *g, const vector<set<uint32_t>> &hap_chains, int *node_type)
+// {
+
+//     for (size_t chain_idx = 0; chain_idx < hap_chains.size(); ++chain_idx)
+//     {
+//         vector<hap_chain_result_t> chain_result;
+//         const auto &node_set = hap_chains[chain_idx];
+//         unordered_set<uint32_t> used;
+//         unordered_map<uint32_t, int> indegree;
+//         // if (node_set.size() < 100)
+//         // {
+//         //     cout << " Now < 100 hap_chains: " << chain_idx << endl;
+//         //     continue;
+//         // }
+//         // Step 1: 计算每个节点的入度（限制为 node_set 中的边）
+//         for (uint32_t u : node_set)
+//         {
+//             uint32_t deg = asg_arc_n(g, u);
+//             asg_arc_t *arcs = asg_arc_a(g, u);
+//             for (uint32_t d = 0; d < deg; ++d)
+//             {
+//                 if (arcs[d].del)
+//                     continue;
+//                 uint32_t v = arcs[d].v;
+//                 if (node_set.count(v))
+//                     indegree[v]++;
+//             }
+//         }
+
+//         cout << "\n=== Chain " << chain_idx << " ===" << endl;
+//         // 分离节点到两个容器中
+//         std::vector<uint32_t> deg_one_nodes;
+//         std::vector<uint32_t> other_nodes;
+//         for (uint32_t u : node_set)
+//         {
+//             uint32_t deg = asg_arc_n(g, u);
+//             if (deg == 1)
+//             {
+//                 deg_one_nodes.push_back(u);
+//             }
+//             else
+//             {
+//                 other_nodes.push_back(u);
+//             }
+//         }
+
+//         for (uint32_t start : deg_one_nodes)
+//         {
+//             if (indegree[start] > 0 || used.count(start))
+//                 continue;
+
+//             vector<uint32_t> path;
+//             uint32_t cur = start;
+//             used.insert(cur);
+//             // 头节点不能返回访问
+//             used.insert(start ^ 1);
+
+//             path.push_back(cur);
+//             cout << "Start: " << g->seq[start >> 1].name << endl;
+//             //  Step 3: 从当前点向下延申，只走 node_set 内部的、未使用的边
+//             while (true)
+//             {
+//                 bool extended = false;
+//                 uint32_t deg = asg_arc_n(g, cur);
+//                 asg_arc_t *arcs = asg_arc_a(g, cur);
+//                 // if (deg == 0)
+//                 // {
+//                 //     uint32_t rev_deg = asg_arc_n(g, cur ^ 1);
+//                 //     asg_arc_t *rev_arcs = asg_arc_a(g, cur);
+//                 //     for (uint32_t d = 0; d < rev_deg; ++d)
+//                 //     {
+//                 //         uint32_t next = arcs[d].v;
+//                 //         if (used.count(next^1))
+//                 //             continue;
+//                 //     }
+//                 // }
+
+//                 if (strcmp(g->seq[cur >> 1].name, "utg034464l") == 0)
+//                 {
+//                     // cout << "Found utg034464l and next is " << g->seq[arcs[1].v >> 1].name << endl;
+//                     cur = arcs[1].v;
+//                     used.insert(cur);
+//                     path.push_back(cur);
+//                     extended = true;
+//                     continue;
+//                 }
+//                 for (uint32_t d = 0; d < deg; ++d)
+//                 {
+//                     if (arcs[d].del)
+//                         continue;
+//                     uint32_t next = arcs[d].v;
+//                     if (deg == 2)
+//                     {
+//                         uint32_t next1 = arcs[0].v;
+//                         uint32_t next2 = arcs[1].v;
+//                         if (g->seq[next1 >> 1].len > g->seq[next2 >> 1].len)
+//                         {
+
+//                             if (node_set.count(next1) && !used.count(next1))
+//                             {
+//                                 // cout << "At node " << g->seq[cur >> 1].name << ", choosing longer next node " << g->seq[next1 >> 1].name << endl;
+//                                 next = next1;
+//                             }
+//                         }
+//                         else
+//                         {
+
+//                             if (node_set.count(next2) && !used.count(next2))
+//                             {
+//                                 // cout << "At node " << g->seq[cur >> 1].name << ", choosing longer next node " << g->seq[next2 >> 1].name << endl;
+//                                 next = next2;
+//                             }
+//                         }
+//                     }
+
+//                     // if (deg == 2)
+//                     //     next = arcs[1].v;
+//                     if (!node_set.count(next))
+//                         continue;
+//                     if (used.count(next))
+//                         continue;
+
+//                     // 延申成功
+//                     cur = next;
+//                     used.insert(cur);
+//                     if (asg_arc_n(g, cur) == 1 && asg_arc_n(g, cur ^ 1) == 1)
+//                     {
+//                         used.insert(cur ^ 1); // ✅ 标记互补方向
+//                     }
+//                     // used.insert(cur ^ 1); // 标记互补方向也为访问
+//                     path.push_back(cur);
+//                     cout << "Add node:  " << g->seq[cur >> 1].name << (cur & 1 ? "-" : "+") << endl;
+//                     extended = true;
+//                     break;
+//                 }
+//                 if (extended == true)
+//                     continue;
+//                 // TODO: add test backword
+//                 cout << "start to test backword" << endl;
+//                 uint32_t deg1 = asg_arc_n(g, cur ^ 1);
+//                 asg_arc_t *arcs1 = asg_arc_a(g, cur ^ 1);
+
+//                 for (uint32_t d = 0; d < deg1; ++d)
+//                 {
+//                     if (arcs1[d].del)
+//                         continue;
+//                     uint32_t next = arcs1[d].v;
+//                     // if (deg == 2)
+//                     //     next = arcs[1].v;
+//                     if (!node_set.count(next))
+//                         continue;
+//                     if (used.count(next))
+//                         continue;
+
+//                     // 延申成功
+//                     cur = next;
+//                     used.insert(cur);
+//                     if (asg_arc_n(g, cur) == 1 && asg_arc_n(g, cur ^ 1) == 1)
+//                     {
+//                         used.insert(cur ^ 1); // ✅ 标记互补方向
+//                     }
+//                     // used.insert(cur ^ 1); // 标记互补方向也为访问
+//                     path.push_back(cur);
+//                     cout << "Add node backward:  " << g->seq[cur >> 1].name << (cur & 1 ? "-" : "+") << endl;
+//                     extended = true;
+//                     break;
+//                 }
+
+//                 if (!extended)
+//                     break;
+//             }
+
+//             if (path.size() > 1)
+//             {
+//                 // 输出路径
+//                 cout << "Path:" << endl;
+//                 for (uint32_t n : path)
+//                 {
+//                     cout << "  " << g->seq[n >> 1].name << (n & 1 ? "-" : "+") << endl;
+//                 }
+
+//                 // 构造 hap_chain_result_t
+//                 hap_chain_result_t result;
+//                 result.begin = path.front();
+//                 result.end = path.back();
+//                 result.hap_path.reserve(path.size());
+//                 for (uint32_t n : path)
+//                 {
+//                     result.hap_path.push_back(n);
+//                 }
+//                 // 把反向方向也标记为访问过
+//                 for (uint32_t n : path)
+//                 {
+//                     used.insert(n);
+//                     used.insert(n ^ 1);
+//                 }
+
+//                 chain_result.push_back(result);
+//             }
+//         }
+
+//         for (uint32_t start : other_nodes)
+//         {
+//             if (indegree[start] > 0 || used.count(start))
+//                 continue;
+
+//             vector<uint32_t> path;
+//             uint32_t cur = start;
+//             used.insert(cur);
+//             // 头节点不能返回访问
+//             used.insert(start ^ 1);
+
+//             path.push_back(cur);
+//             cout << "Start: " << g->seq[start >> 1].name << endl;
+//             //  Step 3: 从当前点向下延申，只走 node_set 内部的、未使用的边
+//             while (true)
+//             {
+//                 bool extended = false;
+//                 uint32_t deg = asg_arc_n(g, cur);
+//                 asg_arc_t *arcs = asg_arc_a(g, cur);
+//                 // if (deg == 0)
+//                 // {
+//                 //     uint32_t rev_deg = asg_arc_n(g, cur ^ 1);
+//                 //     asg_arc_t *rev_arcs = asg_arc_a(g, cur);
+//                 //     for (uint32_t d = 0; d < rev_deg; ++d)
+//                 //     {
+//                 //         uint32_t next = arcs[d].v;
+//                 //         if (used.count(next^1))
+//                 //             continue;
+//                 //     }
+//                 // }
+
+//                 // if (strcmp(g->seq[cur >> 1].name, "utg034464l") == 0)
+//                 // {
+//                 //     // cout << "Found utg034464l and next is " << g->seq[arcs[1].v >> 1].name << endl;
+//                 //     cur = arcs[1].v;
+//                 //     used.insert(cur);
+//                 //     path.push_back(cur);
+//                 //     extended = true;
+//                 //     continue;
+//                 // }
+//                 for (uint32_t d = 0; d < deg; ++d)
+//                 {
+//                     if (arcs[d].del)
+//                         continue;
+//                     uint32_t next = arcs[d].v;
+//                     // if (deg == 2)
+//                     //     next = arcs[1].v;
+//                     if (!node_set.count(next))
+//                         continue;
+//                     if (used.count(next))
+//                         continue;
+
+//                     // 延申成功
+//                     cur = next;
+//                     used.insert(cur);
+//                     if (asg_arc_n(g, cur) == 1 && asg_arc_n(g, cur ^ 1) == 1)
+//                     {
+//                         used.insert(cur ^ 1); // ✅ 标记互补方向
+//                     }
+//                     // used.insert(cur ^ 1); // 标记互补方向也为访问
+//                     path.push_back(cur);
+//                     cout << "Add node backward:  " << g->seq[cur >> 1].name << (cur & 1 ? "-" : "+") << endl;
+//                     extended = true;
+//                     break;
+//                 }
+
+//                 if (!extended)
+//                     break;
+//             }
+//             if (path.size() > 1)
+//             {
+//                 // 输出路径
+//                 cout << "Path:" << endl;
+//                 for (uint32_t n : path)
+//                 {
+//                     cout << "  " << g->seq[n >> 1].name << (n & 1 ? "-" : "+") << endl;
+//                 }
+
+//                 // 构造 hap_chain_result_t
+//                 hap_chain_result_t result;
+//                 result.begin = path.front();
+//                 result.end = path.back();
+//                 result.hap_path.reserve(path.size());
+//                 for (uint32_t n : path)
+//                 {
+//                     result.hap_path.push_back(n);
+//                 }
+//                 // 把反向方向也标记为访问过
+//                 for (uint32_t n : path)
+//                 {
+//                     used.insert(n);
+//                     used.insert(n ^ 1);
+//                 }
+//                 chain_result.push_back(result);
+//             }
+//         }
+
+//         vector<uint32_t> unvisited_nodes;
+//         // Step 4: 打印未使用节点（孤立点或环）
+//         for (uint32_t node : node_set)
+//         {
+//             if (!used.count(node))
+//             {
+//                 cout << "Unvisited node in chain " << chain_idx << ": " << g->seq[node >> 1].name << (node & 1 ? "-" : "+") << "  , node type:" << node_type[node] << endl;
+
+//                 unvisited_nodes.push_back(node);
+//             }
+//         }
+//         // TODO: add test
+
+//         std::unordered_map<uint32_t, int> begin2chains_id;
+//         std::unordered_map<uint32_t, int> end2chains_id;
+//         for (int i = 0; i < chain_result.size(); i++)
+//         {
+//             begin2chains_id[chain_result[i].begin >> 1] = i;
+//             end2chains_id[chain_result[i].end >> 1] = i;
+//             // cout << "chain " << i << " " << chain_result[i].begin << " " << chain_result[i].end << " " << endl;
+//         }
+//         //......................................
+//         std::vector<hap_chain_result_t> chain_result_2;
+
+//         unordered_set<uint32_t> used_1;
+
+//         unordered_set<uint32_t> used_nodes;
+
+//         vector<vector<uint32_t>> dfs_paths;
+//         unvisited_nodes_global.push_back(unvisited_nodes);
+//         if (chain_result.size() > 0)
+//         {
+//             sequence_hap_chains(g, chain_result, node_type);
+//             cerr << "Finish one chain : " << chain_result[0].hap_sequence.length() << " bp" << endl;
+//             hap_results_debug.push_back(chain_result);
+//         }
+//     }
+// }
+
+// void find_all_paths_in_hap_chains(asg_t *g, const vector<set<uint32_t>> &hap_chains, int *node_type)
+// {
+//     for (size_t chain_idx = 0; chain_idx < hap_chains.size(); ++chain_idx)
+//     {
+//         const auto &node_set = hap_chains[chain_idx];
+//         if (node_set.empty()) continue;
+
+//         cout << "\n==============================================" << endl;
+//         cout << "=== Processing Chain " << chain_idx << " (Size: " << node_set.size() << ") ===" << endl;
+//         cout << "==============================================" << endl;
+
+//         // ==========================================
+//         // Step 1: 严格计算局部子图的入度 (In-degree)
+//         // ==========================================
+//         unordered_map<uint32_t, int> indegree;
+//         for (uint32_t u : node_set) indegree[u] = 0; // 初始化
+
+//         for (uint32_t u : node_set)
+//         {
+//             uint32_t deg = asg_arc_n(g, u);
+//             asg_arc_t *arcs = asg_arc_a(g, u);
+//             for (uint32_t d = 0; d < deg; ++d)
+//             {
+//                 if (arcs[d].del) continue;
+//                 uint32_t v = arcs[d].v;
+//                 // 只有目标节点也在当前 hap_chain 中，才算有效的入度
+//                 if (node_set.count(v))
+//                 {
+//                     indegree[v]++;
+//                 }
+//             }
+//         }
+
+//         unordered_set<uint32_t> used;
+//         vector<hap_chain_result_t> chain_result;
+
+//         // ==========================================
+//         // 核心 Lambda 函数：给定一个起点，贪心向前提取最长路径
+//         // ==========================================
+//         auto extract_path_forward = [&](uint32_t start) -> vector<uint32_t> {
+//             vector<uint32_t> path;
+//             uint32_t cur = start;
+
+//             cout << "\n  --> [Path Start] Initiating new path from Source Node" << endl;
+
+//             while (true)
+//             {
+//                 // 1. 标记当前节点以及其反向互补节点为已使用
+//                 used.insert(cur);
+//                 used.insert(cur ^ 1);
+
+//                 // 将当前节点正式加入路径
+//                 path.push_back(cur);
+
+//                 // ===================================================
+//                 // 【测试输出】：清晰打印每一步加入 path 的节点信息
+//                 // 输出格式：步骤数 | 节点ID | 节点名称和方向 | 节点长度
+//                 // ===================================================
+//                 cout << "      [Step " << path.size() << "] Added "
+//                      << "NodeID: " << cur
+//                      << " | Name: " << g->seq[cur >> 1].name << (cur & 1 ? "-" : "+")
+//                      << " | Len: " << g->seq[cur >> 1].len << " bp" << endl;
+
+//                 uint32_t best_next = -1;
+//                 uint32_t max_len = 0;
+//                 bool found_next = false;
+
+//                 uint32_t deg = asg_arc_n(g, cur);
+//                 asg_arc_t *arcs = asg_arc_a(g, cur);
+
+//                 // 2. 扫描所有出边，寻找最佳的下一个节点
+//                 for (uint32_t d = 0; d < deg; ++d)
+//                 {
+//                     if (arcs[d].del) continue;
+//                     uint32_t next = arcs[d].v;
+
+//                     // 必须满足两个条件：(1) 在同一个 chain 内 (2) 之前没走过
+//                     if (!node_set.count(next) || used.count(next))
+//                         continue;
+
+//                     // 贪心策略：如果出现分叉，选择序列最长的那个节点
+//                     uint32_t next_seq_len = g->seq[next >> 1].len;
+//                     if (next_seq_len > max_len)
+//                     {
+//                         max_len = next_seq_len;
+//                         best_next = next;
+//                         found_next = true;
+//                     }
+//                 }
+
+//                 // 如果找不到合法的下一个节点，则路径延伸结束
+//                 if (!found_next) {
+//                     cout << "  --> [Path End] Reached a dead end or all branches are visited. Total nodes in this path: " << path.size() << "\n" << endl;
+//                     break;
+//                 }
+
+//                 // 更新当前节点为下一个最优节点，准备进入下一轮循环加入 path
+//                 cur = best_next;
+//             }
+//             return path;
+//         };
+
+//         // ==========================================
+//         // Step 2: 优先从入度为 0 的源头 (Source) 开始寻路
+//         // ==========================================
+//         for (uint32_t start : node_set)
+//         {
+//             if (indegree[start] == 0 && !used.count(start) && !used.count(start ^ 1))
+//             {
+//                 vector<uint32_t> path = extract_path_forward(start);
+//                 if (path.size() > 1) // 路径有效
+//                 {
+//                     hap_chain_result_t result;
+//                     result.begin = path.front();
+//                     result.end = path.back();
+//                     result.hap_path = path;
+//                     chain_result.push_back(result);
+//                 }
+//             }
+//         }
+
+//         // ==========================================
+//         // Step 3: 处理图中的环 (Cycle)
+//         // ==========================================
+//         for (uint32_t start : node_set)
+//         {
+//             if (!used.count(start) && !used.count(start ^ 1))
+//             {
+//                 cout << "\n  [Cycle Warning] Breaking cycle. Starting from arbitrary internal node." << endl;
+//                 vector<uint32_t> path = extract_path_forward(start);
+//                 if (path.size() > 1)
+//                 {
+//                     hap_chain_result_t result;
+//                     result.begin = path.front();
+//                     result.end = path.back();
+//                     result.hap_path = path;
+//                     chain_result.push_back(result);
+//                 }
+//             }
+//         }
+
+//         // ==========================================
+//         // Step 4: 打印孤立点 / 未访问节点
+//         // ==========================================
+//         vector<uint32_t> unvisited_nodes;
+//         for (uint32_t node : node_set)
+//         {
+//             if (!used.count(node) && !used.count(node ^ 1))
+//             {
+//                 cout << "[Unvisited Warning] Leftover node in chain " << chain_idx << ": "
+//                      << g->seq[node >> 1].name << (node & 1 ? "-" : "+")
+//                      << " (ID: " << node << ")"
+//                      << " | node_type: " << node_type[node] << endl;
+//                 unvisited_nodes.push_back(node);
+//             }
+//         }
+
+//         // unvisited_nodes_global.push_back(unvisited_nodes);
+
+//         // ==========================================
+//         // Step 5: 调用外部序列生成函数
+//         // ==========================================
+//         if (chain_result.size() > 0)
+//         {
+//             sequence_hap_chains(g, chain_result, node_type);
+//             cerr << "[Success] Finished exporting one chain. Total length: " << chain_result[0].hap_sequence.length() << " bp\n" << endl;
+//             // hap_results_debug.push_back(chain_result);
+//         }
+//     }
+// }
+
+void find_all_paths_in_hap_chains_plant(asg_t *g, const vector<set<uint32_t>> &hap_chains, int *node_type, const string &output_directory)
 {
+    // 准备输出文件
+    string fa_file_path = output_directory + "/hap_chains.fa";
+    string txt_file_path = output_directory + "/hap_chains_path.txt";
+    ofstream fa_out(fa_file_path);
+    ofstream txt_out(txt_file_path);
+
+    if (!fa_out.is_open() || !txt_out.is_open())
+    {
+        cerr << "[ERROR] Cannot open output files in directory: " << output_directory << endl;
+        return;
+    }
+
+    int output_counter = 1; // 用于命名 hap_chains1, hap_chains2 ...
 
     for (size_t chain_idx = 0; chain_idx < hap_chains.size(); ++chain_idx)
     {
-        vector<hap_chain_result_t> chain_result;
         const auto &node_set = hap_chains[chain_idx];
-        unordered_set<uint32_t> used;
+        if (node_set.empty())
+            continue;
+
+        cout << "\n==============================================" << endl;
+        cout << "=== Processing Plant Chain " << chain_idx << " (Size: " << node_set.size() << ") ===" << endl;
+        cout << "==============================================" << endl;
+
+        // ==========================================
+        // Step 1: 严格计算局部子图的入度 (In-degree) 和出度 (Out-degree)
+        // ==========================================
         unordered_map<uint32_t, int> indegree;
-        // if (node_set.size() < 100)
-        // {
-        //     cout << " Now < 100 hap_chains: " << chain_idx << endl;
-        //     continue;
-        // }
-        // Step 1: 计算每个节点的入度（限制为 node_set 中的边）
+        unordered_map<uint32_t, int> outdegree;
+        for (uint32_t u : node_set)
+        {
+            indegree[u] = 0;
+            outdegree[u] = 0;
+        }
+
         for (uint32_t u : node_set)
         {
             uint32_t deg = asg_arc_n(g, u);
@@ -3459,553 +4111,427 @@ void find_all_paths_in_hap_chains(asg_t *g, const vector<set<uint32_t>> &hap_cha
                     continue;
                 uint32_t v = arcs[d].v;
                 if (node_set.count(v))
-                    indegree[v]++;
+                {
+                    outdegree[u]++; // 记录出度
+                    indegree[v]++;  // 记录入度
+                }
             }
         }
 
-        cout << "\n=== Chain " << chain_idx << " ===" << endl;
-        // 分离节点到两个容器中
-        std::vector<uint32_t> deg_one_nodes;
-        std::vector<uint32_t> other_nodes;
+        // ==========================================
+        // Step 2: 找出所有入度为 0 的节点，并挑选最长的一个作为起点
+        // ==========================================
+        uint32_t best_start_node = -1;
+        uint32_t max_start_len = 0;
+        bool found_source = false;
+
         for (uint32_t u : node_set)
         {
-            uint32_t deg = asg_arc_n(g, u);
-            if (deg == 1)
+            if (indegree[u] == 0)
             {
-                deg_one_nodes.push_back(u);
-            }
-            else
-            {
-                other_nodes.push_back(u);
+                uint32_t len = g->seq[u >> 1].len;
+                if (len > max_start_len)
+                {
+                    max_start_len = len;
+                    best_start_node = u;
+                    found_source = true;
+                }
             }
         }
 
-        for (uint32_t start : deg_one_nodes)
+        // 兜底策略：如果图是一个完美的环（没有入度为0的节点），则全局挑选最长的节点作为起点
+        if (!found_source)
         {
-            if (indegree[start] > 0 || used.count(start))
-                continue;
-
-            vector<uint32_t> path;
-            uint32_t cur = start;
-            used.insert(cur);
-            // 头节点不能返回访问
-            used.insert(start ^ 1);
-
-            path.push_back(cur);
-            cout << "Start: " << g->seq[start >> 1].name << endl;
-            //  Step 3: 从当前点向下延申，只走 node_set 内部的、未使用的边
-            while (true)
+            cout << "  [Warning] No in-degree 0 node found (Possible cycle). Selecting the longest node overall as start." << endl;
+            for (uint32_t u : node_set)
             {
-                bool extended = false;
-                uint32_t deg = asg_arc_n(g, cur);
-                asg_arc_t *arcs = asg_arc_a(g, cur);
-                // if (deg == 0)
-                // {
-                //     uint32_t rev_deg = asg_arc_n(g, cur ^ 1);
-                //     asg_arc_t *rev_arcs = asg_arc_a(g, cur);
-                //     for (uint32_t d = 0; d < rev_deg; ++d)
-                //     {
-                //         uint32_t next = arcs[d].v;
-                //         if (used.count(next^1))
-                //             continue;
-                //     }
-                // }
-
-                if (strcmp(g->seq[cur >> 1].name, "utg034464l") == 0)
+                uint32_t len = g->seq[u >> 1].len;
+                if (len > max_start_len)
                 {
-                    // cout << "Found utg034464l and next is " << g->seq[arcs[1].v >> 1].name << endl;
-                    cur = arcs[1].v;
-                    used.insert(cur);
-                    path.push_back(cur);
-                    extended = true;
-                    continue;
+                    max_start_len = len;
+                    best_start_node = u;
                 }
-                for (uint32_t d = 0; d < deg; ++d)
-                {
-                    if (arcs[d].del)
-                        continue;
-                    uint32_t next = arcs[d].v;
-                    if (deg == 2)
-                    {
-                        uint32_t next1 = arcs[0].v;
-                        uint32_t next2 = arcs[1].v;
-                        if (g->seq[next1 >> 1].len > g->seq[next2 >> 1].len)
-                        {
-
-                            if (node_set.count(next1) && !used.count(next1))
-                            {
-                                // cout << "At node " << g->seq[cur >> 1].name << ", choosing longer next node " << g->seq[next1 >> 1].name << endl;
-                                next = next1;
-                            }
-                        }
-                        else
-                        {
-
-                            if (node_set.count(next2) && !used.count(next2))
-                            {
-                                // cout << "At node " << g->seq[cur >> 1].name << ", choosing longer next node " << g->seq[next2 >> 1].name << endl;
-                                next = next2;
-                            }
-                        }
-                    }
-
-                    // if (deg == 2)
-                    //     next = arcs[1].v;
-                    if (!node_set.count(next))
-                        continue;
-                    if (used.count(next))
-                        continue;
-
-                    // 延申成功
-                    cur = next;
-                    used.insert(cur);
-                    if (asg_arc_n(g, cur) == 1 && asg_arc_n(g, cur ^ 1) == 1)
-                    {
-                        used.insert(cur ^ 1); // ✅ 标记互补方向
-                    }
-                    // used.insert(cur ^ 1); // 标记互补方向也为访问
-                    path.push_back(cur);
-                    cout << "Add node:  " << g->seq[cur >> 1].name << (cur & 1 ? "-" : "+") << endl;
-                    extended = true;
-                    break;
-                }
-                if (extended == true)
-                    continue;
-                // TODO: add test backword
-                cout << "start to test backword" << endl;
-                uint32_t deg1 = asg_arc_n(g, cur ^ 1);
-                asg_arc_t *arcs1 = asg_arc_a(g, cur ^ 1);
-
-                for (uint32_t d = 0; d < deg1; ++d)
-                {
-                    if (arcs1[d].del)
-                        continue;
-                    uint32_t next = arcs1[d].v;
-                    // if (deg == 2)
-                    //     next = arcs[1].v;
-                    if (!node_set.count(next))
-                        continue;
-                    if (used.count(next))
-                        continue;
-
-                    // 延申成功
-                    cur = next;
-                    used.insert(cur);
-                    if (asg_arc_n(g, cur) == 1 && asg_arc_n(g, cur ^ 1) == 1)
-                    {
-                        used.insert(cur ^ 1); // ✅ 标记互补方向
-                    }
-                    // used.insert(cur ^ 1); // 标记互补方向也为访问
-                    path.push_back(cur);
-                    cout << "Add node backward:  " << g->seq[cur >> 1].name << (cur & 1 ? "-" : "+") << endl;
-                    extended = true;
-                    break;
-                }
-
-                if (!extended)
-                    break;
-            }
-
-            if (path.size() > 1)
-            {
-                // 输出路径
-                cout << "Path:" << endl;
-                for (uint32_t n : path)
-                {
-                    cout << "  " << g->seq[n >> 1].name << (n & 1 ? "-" : "+") << endl;
-                }
-
-                // 构造 hap_chain_result_t
-                hap_chain_result_t result;
-                result.begin = path.front();
-                result.end = path.back();
-                result.hap_path.reserve(path.size());
-                for (uint32_t n : path)
-                {
-                    result.hap_path.push_back(n);
-                }
-                // 把反向方向也标记为访问过
-                for (uint32_t n : path)
-                {
-                    used.insert(n);
-                    used.insert(n ^ 1);
-                }
-
-                chain_result.push_back(result);
             }
         }
 
-        for (uint32_t start : other_nodes)
+        if (best_start_node == (uint32_t)-1)
+            continue; // 异常处理
+
+        cout << "  --> Selected Start Node: " << best_start_node
+             << " (Name: " << g->seq[best_start_node >> 1].name << (best_start_node & 1 ? "-" : "+")
+             << ", Len: " << max_start_len << ")" << endl;
+
+        // ==========================================
+        // Step 3: 深度优先搜索 (DFS) 寻找不走回头路的最长链
+        // ==========================================
+        vector<uint32_t> best_path;
+        uint32_t global_max_path_len = 0;
+
+        // DFS Lambda
+        auto dfs_longest_path = [&](auto &self, uint32_t cur, unordered_set<uint32_t> &current_visited,
+                                    vector<uint32_t> &current_path, uint32_t current_len) -> void
         {
-            if (indegree[start] > 0 || used.count(start))
-                continue;
+            current_visited.insert(cur);
+            current_visited.insert(cur ^ 1); // 防止走反向节点，保证不走回头路
+            current_path.push_back(cur);
+            current_len += g->seq[cur >> 1].len;
 
-            vector<uint32_t> path;
-            uint32_t cur = start;
-            used.insert(cur);
-            // 头节点不能返回访问
-            used.insert(start ^ 1);
+            bool is_leaf = true;
+            uint32_t deg = asg_arc_n(g, cur);
+            asg_arc_t *arcs = asg_arc_a(g, cur);
 
-            path.push_back(cur);
-            cout << "Start: " << g->seq[start >> 1].name << endl;
-            //  Step 3: 从当前点向下延申，只走 node_set 内部的、未使用的边
-            while (true)
+            for (uint32_t d = 0; d < deg; ++d)
             {
-                bool extended = false;
-                uint32_t deg = asg_arc_n(g, cur);
-                asg_arc_t *arcs = asg_arc_a(g, cur);
-                // if (deg == 0)
-                // {
-                //     uint32_t rev_deg = asg_arc_n(g, cur ^ 1);
-                //     asg_arc_t *rev_arcs = asg_arc_a(g, cur);
-                //     for (uint32_t d = 0; d < rev_deg; ++d)
-                //     {
-                //         uint32_t next = arcs[d].v;
-                //         if (used.count(next^1))
-                //             continue;
-                //     }
-                // }
+                if (arcs[d].del)
+                    continue;
+                uint32_t next = arcs[d].v;
 
-                // if (strcmp(g->seq[cur >> 1].name, "utg034464l") == 0)
-                // {
-                //     // cout << "Found utg034464l and next is " << g->seq[arcs[1].v >> 1].name << endl;
-                //     cur = arcs[1].v;
-                //     used.insert(cur);
-                //     path.push_back(cur);
-                //     extended = true;
-                //     continue;
-                // }
-                for (uint32_t d = 0; d < deg; ++d)
+                // 仅在子图内搜索，且不走已访问的节点
+                if (node_set.count(next) && !current_visited.count(next))
                 {
-                    if (arcs[d].del)
-                        continue;
-                    uint32_t next = arcs[d].v;
-                    // if (deg == 2)
-                    //     next = arcs[1].v;
-                    if (!node_set.count(next))
-                        continue;
-                    if (used.count(next))
-                        continue;
-
-                    // 延申成功
-                    cur = next;
-                    used.insert(cur);
-                    if (asg_arc_n(g, cur) == 1 && asg_arc_n(g, cur ^ 1) == 1)
-                    {
-                        used.insert(cur ^ 1); // ✅ 标记互补方向
-                    }
-                    // used.insert(cur ^ 1); // 标记互补方向也为访问
-                    path.push_back(cur);
-                    cout << "Add node backward:  " << g->seq[cur >> 1].name << (cur & 1 ? "-" : "+") << endl;
-                    extended = true;
-                    break;
+                    is_leaf = false;
+                    self(self, next, current_visited, current_path, current_len);
                 }
-
-                if (!extended)
-                    break;
             }
-            if (path.size() > 1)
+
+            // 到达终点（出度为0的节点或死胡同）时，更新全局最长路径
+            if (is_leaf)
             {
-                // 输出路径
-                cout << "Path:" << endl;
-                for (uint32_t n : path)
+                if (current_len > global_max_path_len)
                 {
-                    cout << "  " << g->seq[n >> 1].name << (n & 1 ? "-" : "+") << endl;
+                    global_max_path_len = current_len;
+                    best_path = current_path;
                 }
-
-                // 构造 hap_chain_result_t
-                hap_chain_result_t result;
-                result.begin = path.front();
-                result.end = path.back();
-                result.hap_path.reserve(path.size());
-                for (uint32_t n : path)
-                {
-                    result.hap_path.push_back(n);
-                }
-                // 把反向方向也标记为访问过
-                for (uint32_t n : path)
-                {
-                    used.insert(n);
-                    used.insert(n ^ 1);
-                }
-                chain_result.push_back(result);
             }
+
+            // 回溯
+            current_path.pop_back();
+            current_visited.erase(cur);
+            current_visited.erase(cur ^ 1);
+        };
+
+        unordered_set<uint32_t> dfs_visited;
+        vector<uint32_t> dfs_path;
+        dfs_longest_path(dfs_longest_path, best_start_node, dfs_visited, dfs_path, 0);
+        // ==========================================
+        // 新增拦截 1：如果 DFS 没找到任何有效路径，直接跳过当前 Chain
+        // ==========================================
+        if (best_path.empty())
+        {
+            cout << "  [Warning] Best path is empty for chain " << chain_idx << ". Skipping..." << endl;
+            continue;
         }
 
-        // Step 2: 找入度为0且未使用的起点
-        // for (uint32_t start : node_set)
-        // {
-        //     if (indegree[start] > 0 || used.count(start))
-        //         continue;
+        // ==========================================
+        // Step 4: 标记未访问节点并输出结果
+        // ==========================================
+        unordered_set<uint32_t> final_used;
+        for (uint32_t node : best_path)
+        {
+            final_used.insert(node);
+            final_used.insert(node ^ 1);
+        }
 
-        //     vector<uint32_t> path;
-        //     uint32_t cur = start;
-        //     used.insert(cur);
-        //     // 头节点不能返回访问
-        //     used.insert(start ^ 1);
-
-        //     path.push_back(cur);
-        //     cout << "Start: " << g->seq[start >> 1].name << endl;
-        //     // Step 3: 从当前点向下延申，只走 node_set 内部的、未使用的边
-        //     while (true)
-        //     {
-        //         bool extended = false;
-        //         uint32_t deg = asg_arc_n(g, cur);
-        //         asg_arc_t *arcs = asg_arc_a(g, cur);
-        //         // if (deg == 0)
-        //         // {
-        //         //     uint32_t rev_deg = asg_arc_n(g, cur ^ 1);
-        //         //     asg_arc_t *rev_arcs = asg_arc_a(g, cur);
-        //         //     for (uint32_t d = 0; d < rev_deg; ++d)
-        //         //     {
-        //         //         uint32_t next = arcs[d].v;
-        //         //         if (used.count(next^1))
-        //         //             continue;
-        //         //     }
-        //         // }
-
-        //         if (strcmp(g->seq[cur >> 1].name, "utg034464l") == 0)
-        //         {
-        //             cout << "Found utg034464l and next is " << g->seq[arcs[1].v >> 1].name << endl;
-        //             cur = arcs[1].v;
-        //             used.insert(cur);
-        //             path.push_back(cur);
-        //             extended = true;
-        //             continue;
-        //         }
-        //         for (uint32_t d = 0; d < deg; ++d)
-        //         {
-        //             if (arcs[d].del)
-        //                 continue;
-        //             uint32_t next = arcs[d].v;
-        //             // if (deg == 2)
-        //             //     next = arcs[1].v;
-        //             if (!node_set.count(next))
-        //                 continue;
-        //             if (used.count(next))
-        //                 continue;
-
-        //             // 延申成功
-        //             cur = next;
-        //             used.insert(cur);
-        //             if (asg_arc_n(g, cur) == 1 && asg_arc_n(g, cur ^ 1) == 1)
-        //             {
-        //                 used.insert(cur ^ 1); // ✅ 标记互补方向
-        //             }
-        //             // used.insert(cur ^ 1); // 标记互补方向也为访问
-        //             path.push_back(cur);
-        //             cout << "Add node:  " << g->seq[cur >> 1].name << (cur & 1 ? "-" : "+") << endl;
-        //             extended = true;
-        //             break;
-        //         }
-
-        //         if (!extended)
-        //             break;
-        //     }
-        //     if (path.size() > 1)
-        //     {
-        //         // 输出路径
-        //         cout << "Path:" << endl;
-        //         for (uint32_t n : path)
-        //         {
-        //             cout << "  " << g->seq[n >> 1].name << (n & 1 ? "-" : "+") << endl;
-        //         }
-
-        //         // 构造 hap_chain_result_t
-        //         hap_chain_result_t result;
-        //         result.begin = path.front();
-        //         result.end = path.back();
-        //         result.hap_path.reserve(path.size());
-        //         for (uint32_t n : path)
-        //         {
-        //             result.hap_path.push_back(n);
-        //         }
-        //         // 把反向方向也标记为访问过
-        //         for (uint32_t n : path)
-        //         {
-        //             used.insert(n);
-        //             used.insert(n ^ 1);
-        //         }
-        //         chain_result.push_back(result);
-        //     }
-        // }
         vector<uint32_t> unvisited_nodes;
-        // Step 4: 打印未使用节点（孤立点或环）
         for (uint32_t node : node_set)
         {
-            if (!used.count(node))
+            if (!final_used.count(node))
             {
-                cout << "Unvisited node in chain " << chain_idx << ": " << g->seq[node >> 1].name << (node & 1 ? "-" : "+") << "  , node type:" << node_type[node] << endl;
-
+                cout << "[Unvisited Warning] Leftover node in chain " << chain_idx << ": "
+                     << g->seq[node >> 1].name << (node & 1 ? "-" : "+")
+                     << " (ID: " << node << ")"
+                     << " | node_type: " << node_type[node] << endl;
                 unvisited_nodes.push_back(node);
             }
         }
-        // TODO: add test
-
-        std::unordered_map<uint32_t, int> begin2chains_id;
-        std::unordered_map<uint32_t, int> end2chains_id;
-        for (int i = 0; i < chain_result.size(); i++)
-        {
-            begin2chains_id[chain_result[i].begin >> 1] = i;
-            end2chains_id[chain_result[i].end >> 1] = i;
-            // cout << "chain " << i << " " << chain_result[i].begin << " " << chain_result[i].end << " " << endl;
-        }
-        //......................................
-        std::vector<hap_chain_result_t> chain_result_2;
-        // vector<bool> used(chain_result.size(), false);
-        // cout << "chain_result.size():" << chain_result.size() << endl;
-        unordered_set<uint32_t> used_1;
-        // for (size_t i = 0; i < chain_result.size(); ++i)
-        // {
-        //     if (used_1.count(i))
-        //         continue;
-
-        //     vector<uint32_t> merged = chain_result[i].hap_path;
-
-        //     used_1.insert(i);
-
-        //     bool found_connection = true;
-        //     int j = 0;
-        //     while (found_connection)
-        //     {
-        //         found_connection = false;
-        //         vector<uint32_t> merged_new;
-        //         vector<uint32_t> merged_after;
-        //         vector<uint32_t> merged_before;
-        //         for (uint32_t n : used_1)
-        //         {
-        //             cout << "in used_1 n:" << n << " " << chain_result[n].begin << " " << chain_result[n].end << " " << endl;
-        //         }
-        //         // 从end端查找
-        //         if (j == i)
-        //         {
-        //             j++;
-        //             found_connection = true;
-        //             cout << "j == i" << endl;
-        //             continue;
-        //         }
-        //         if (j > chain_result.size())
-        //         {
-
-        //             cout << "j > chain_result.size()" << endl;
-        //             continue;
-        //         }
-        //         // if (used_1[j])
-        //         //     continue;
-
-        //         // 检查当前chain的end是否连接到chain j的begin
-        //         int forward = check_connection(g, merged.back(), begin2chains_id, end2chains_id, used_1);
-
-        //         if (forward == 1)
-        //         {
-        //             // end 2 begin
-        //             cout << "found end 2 begin connection between chain " << i << " and chain " << j << endl;
-        //             merged_after.insert(merged_after.end(), chain_result[j].hap_path.begin(), chain_result[j].hap_path.end());
-        //         }
-        //         if (forward == 2)
-        //         {
-        //             vector<uint32_t> reverse_hap_path;
-        //             reverse_hap_path.reserve(chain_result[j].hap_path.size());
-        //             for (auto it = chain_result[j].hap_path.rbegin(); it != chain_result[j].hap_path.rend(); ++it)
-        //             {
-        //                 reverse_hap_path.push_back(*it ^ 1);
-        //             }
-        //             merged_after.insert(merged_after.end(), reverse_hap_path.begin(), reverse_hap_path.end());
-        //             cout << "found end 2 end connection between chain " << i << " and chain " << j << endl;
-        //             // end 2 end
-        //             //  merged_after.insert(merged_after.end(), reversed_utg_path.begin(), reversed_utg_path.end())
-        //         }
-
-        //         // begin
-        //         int forward2 = check_connection(g, merged.front(), begin2chains_id, end2chains_id, used_1);
-        //         if (forward2 == 1)
-        //         {
-        //             // begin 2 begin  反转chain j
-        //             vector<uint32_t> reverse_hap_path;
-
-        //             reverse_hap_path.reserve(chain_result[j].hap_path.size());
-        //             for (auto it = chain_result[j].hap_path.rbegin(); it != chain_result[j].hap_path.rend(); ++it)
-        //             {
-        //                 reverse_hap_path.push_back(*it ^ 1);
-        //             }
-        //             merged_before.insert(merged_before.end(), reverse_hap_path.begin(), reverse_hap_path.end());
-        //             cout << "found begin 2 begin connection between chain " << i << " and chain " << j << endl;
-        //         }
-        //         if (forward2 == 2)
-        //         {
-        //             // end 2 begin
-        //             merged_before.insert(merged_before.end(), chain_result[j].hap_path.begin(), chain_result[j].hap_path.end());
-        //             cout << "found end 2 begin connection between chain " << i << " and chain " << j << endl;
-        //         }
-        //         // 添加路径：
-        //         if (merged_before.size() > 0)
-        //         {
-        //             merged_new.insert(merged_new.end(), merged_before.begin(), merged_before.end());
-        //         }
-        //         merged_new.insert(merged_new.end(), merged.begin(), merged.end());
-
-        //         if (merged_after.size() > 0)
-        //         {
-        //             merged_new.insert(merged_new.end(), merged_after.begin(), merged_after.end());
-        //         }
-        //         merged.clear();
-        //         merged = merged_new;
-
-        //         if (merged_before.size() > 0 || merged_after.size() > 0)
-        //         {
-        //             found_connection = true;
-        //         }
-
-        //         // if (found_connection)
-        //         //     continue;
-
-        //         // // 从begin端查找
-        //         // for (size_t j = 0; j < chain_result.size(); ++j)
-        //         // {
-        //         //     if (used[j])
-        //         //         continue;
-
-        //         //     // 检查chain j的end是否连接到当前chain的begin
-        //         //     if (check_connection(g, chain_result[j].end, merged.begin))
-        //         //     {
-        //         //         merged = merge_chains(chain_result[j], merged, g, true);
-        //         //         used[j] = true;
-        //         //         found_connection = true;
-        //         //         cout << "从begin连接: chain " << j << " -> chain " << i << endl;
-        //         //         break;
-        //         //     }
-        //         // }
-        //         j++;
-        //     }
-
-        //     // result.push_back(merged);
-
-        //     cout << "New Path:" << endl;
-        //     for (uint32_t n : merged)
-        //     {
-        //         cout << "  " << g->seq[n >> 1].name << (n & 1 ? "-" : "+") << endl;
-        //     }
-
-        //     // 构造 hap_chain_result_t
-        //     hap_chain_result_t result;
-        //     result.begin = merged.front();
-        //     result.end = merged.back();
-        //     result.hap_path = merged;
-        //     chain_result_2.push_back(result);
-        // }
-
-        //****************************************/
-
-        // Step 6: 输出未访问节点（考虑正反向都算 visited）
-
-        unordered_set<uint32_t> used_nodes;
-
-        vector<vector<uint32_t>> dfs_paths;
         unvisited_nodes_global.push_back(unvisited_nodes);
+
+        // 构建准备生成序列的结构体
+        vector<hap_chain_result_t> chain_result;
+        hap_chain_result_t result;
+        result.begin = best_path.front();
+        result.end = best_path.back();
+        result.hap_path = best_path;
+        chain_result.push_back(result);
+
+        // ==========================================
+        // Step 5: 调用外部序列生成，并进行最终空值拦截与文件输出
+        // ==========================================
+        sequence_hap_chains(g, chain_result, node_type);
+
+        // 新增拦截 2：严苛的判空逻辑，必须保证 chain_result 不为空，且内部的路径和拼接出的序列都不为空
+        if (!chain_result.empty() && !chain_result[0].hap_path.empty() && !chain_result[0].hap_sequence.empty())
+        {
+            cerr << "[Success] Finished exporting plant chain. Total base pairs: " << chain_result[0].hap_sequence.length() << " bp\n"
+                 << endl;
+
+            // 加入全局 debug 记录
+            hap_results_debug.push_back(chain_result);
+
+            // 输出到外部文件 (.fa 和 .txt)
+            string chain_name = "hap_chains" + to_string(output_counter);
+
+            // 写入 FASTA
+            fa_out << ">" << chain_name << "\n"
+                   << chain_result[0].hap_sequence << "\n";
+
+            // 写入 TXT (记录由哪些 utg 正反向按顺序组成)
+            txt_out << chain_name << ": ";
+            for (size_t i = 0; i < best_path.size(); ++i)
+            {
+                uint32_t node = best_path[i];
+                txt_out << g->seq[node >> 1].name << (node & 1 ? "-" : "+");
+                if (i != best_path.size() - 1)
+                    txt_out << " ";
+            }
+            txt_out << "\n";
+
+            output_counter++; // 只有成功写入，计数器才自增，避免出现 hap_chains 编号跳跃
+        }
+        else
+        {
+            cout << "  [Warning] Generated sequence or path is empty for chain " << chain_idx << " after sequencing. Ignored." << endl;
+        }
+    }
+
+    fa_out.close();
+    txt_out.close();
+    cout << "[INFO] All plant chains written to " << fa_file_path << " and " << txt_file_path << endl;
+}
+
+void find_all_paths_in_hap_chains(asg_t *g, const vector<set<uint32_t>> &hap_chains, int *node_type)
+{
+    for (size_t chain_idx = 0; chain_idx < hap_chains.size(); ++chain_idx)
+    {
+        const auto &node_set = hap_chains[chain_idx];
+        if (node_set.empty())
+            continue;
+
+        // cout << "\n==============================================" << endl;
+        // cout << "=== Processing Chain " << chain_idx << " (Size: " << node_set.size() << ") ===" << endl;
+        // cout << "==============================================" << endl;
+
+        // ==========================================
+        // Step 1: 严格计算局部子图的入度 (In-degree) 和出度 (Out-degree)
+        // ==========================================
+        unordered_map<uint32_t, int> indegree;
+        unordered_map<uint32_t, int> outdegree;
+        for (uint32_t u : node_set)
+        {
+            indegree[u] = 0;
+            outdegree[u] = 0;
+        }
+
+        for (uint32_t u : node_set)
+        {
+            uint32_t deg = asg_arc_n(g, u);
+            asg_arc_t *arcs = asg_arc_a(g, u);
+            for (uint32_t d = 0; d < deg; ++d)
+            {
+                if (arcs[d].del)
+                    continue;
+                uint32_t v = arcs[d].v;
+                if (node_set.count(v))
+                {
+                    outdegree[u]++; // 记录出度
+                    indegree[v]++;  // 记录入度
+                }
+            }
+        }
+
+        unordered_set<uint32_t> used;
+        vector<hap_chain_result_t> chain_result;
+
+        // --- 辅助 Lambda：计算某节点的未访问前驱数量 ---
+        auto count_unvisited_predecessors = [&](uint32_t node) -> int
+        {
+            int unvisited_count = 0;
+            // 节点 node 的前驱，等价于 node的反向互补节点(node^1) 的出边目标 的反向互补
+            uint32_t rev_node = node ^ 1;
+            uint32_t deg = asg_arc_n(g, rev_node);
+            asg_arc_t *arcs = asg_arc_a(g, rev_node);
+            for (uint32_t d = 0; d < deg; ++d)
+            {
+                if (arcs[d].del)
+                    continue;
+                uint32_t rev_pred = arcs[d].v;
+                uint32_t pred = rev_pred ^ 1;
+
+                // 如果前驱在集合内，且没有被访问过
+                if (node_set.count(pred) && !used.count(pred))
+                {
+                    unvisited_count++;
+                }
+            }
+            return unvisited_count;
+        };
+
+        // ==========================================
+        // 核心 Lambda 函数：给定一个起点，贪心向前提取最长路径
+        // ==========================================
+        auto extract_path_forward = [&](uint32_t start) -> vector<uint32_t>
+        {
+            vector<uint32_t> path;
+            uint32_t cur = start;
+
+            // cout << "\n  --> [Path Start] Initiating new path from Source Node" << endl;
+
+            while (true)
+            {
+                // 1. 永远标记当前正向节点为已访问
+                used.insert(cur);
+                path.push_back(cur);
+
+                // ===================================================
+                // 核心修改：判断是否为“蝴蝶共享节点”，决定是否锁死反向路径
+                // ===================================================
+                bool lock_reverse = true;
+
+                if (indegree[cur] == 2 && outdegree[cur] == 2)
+                {
+                    int unv_preds = count_unvisited_predecessors(cur);
+                    if (unv_preds > 0)
+                    {
+                        lock_reverse = false; // 解除反向锁死！留给另一条路走
+                        //cout << "      [Special Branch] Node " << cur << " is a shared butterfly node. Leaving reverse path open!" << endl;
+                    }
+                }
+
+                if (lock_reverse)
+                {
+                    used.insert(cur ^ 1);
+                }
+
+                // 输出当前步骤信息
+                // cout << "      [Step " << path.size() << "] Added "
+                //      << "NodeID: " << cur
+                //      << " | Name: " << g->seq[cur >> 1].name << (cur & 1 ? "-" : "+")
+                //      << " | Len: " << g->seq[cur >> 1].len << " bp" << endl;
+
+                uint32_t best_next = -1;
+                uint32_t max_len = 0;
+                bool found_next = false;
+
+                uint32_t deg = asg_arc_n(g, cur);
+                asg_arc_t *arcs = asg_arc_a(g, cur);
+
+                // 2. 扫描所有出边，寻找最佳的下一个节点
+                for (uint32_t d = 0; d < deg; ++d)
+                {
+                    if (arcs[d].del)
+                        continue;
+                    uint32_t next = arcs[d].v;
+
+                    if (!node_set.count(next) || used.count(next))
+                        continue;
+
+                    // 贪心策略
+                    uint32_t next_seq_len = g->seq[next >> 1].len;
+                    if (next_seq_len > max_len)
+                    {
+                        max_len = next_seq_len;
+                        best_next = next;
+                        found_next = true;
+                    }
+                }
+
+                if (!found_next)
+                {
+                    // cout << "  --> [Path End] Reached a dead end or all branches are visited. Total nodes in this path: " << path.size() << "\n"
+                    //      << endl;
+                    break;
+                }
+
+                cur = best_next;
+            }
+            return path;
+        };
+
+        // ==========================================
+        // 辅助 Lambda：计算路径的总长度 (bp)
+        // 注意：这里是简单粗暴的累加节点序列长度。
+        // 如果图中的边包含较大 overlap，可以通过减去 overlap 长度来让计算更精确。
+        // ==========================================
+        auto get_path_length = [&](const vector<uint32_t>& path) -> uint32_t
+        {
+            uint32_t total_len = 0;
+            for (uint32_t n : path)
+            {
+                total_len += g->seq[n >> 1].len;
+            }
+            return total_len;
+        };
+
+        // ==========================================
+        // Step 2: 优先从入度为 0 的源头 (Source) 开始寻路
+        // ==========================================
+        for (uint32_t start : node_set)
+        {
+            if (indegree[start] == 0 && !used.count(start) && !used.count(start ^ 1))
+            {
+                vector<uint32_t> path = extract_path_forward(start);
+                uint32_t path_length = get_path_length(path);
+
+                // 【核心修改】：只保留大于等于 500kb 的长序列
+                if (path_length >= 1000000) 
+                {
+                    hap_chain_result_t result;
+                    result.begin = path.front();
+                    result.end = path.back();
+                    result.hap_path = path;
+                    chain_result.push_back(result);
+                }
+                // 低于 500kb 的 path 会被丢弃，但它们包含的节点已经在 `extract_path_forward` 
+                // 中被标记为 used，所以不会被后面的操作重复抓取，从而干净地被剔除。
+            }
+        }
+
+        // ==========================================
+        // Step 3: 处理图中的环 (Cycle)
+        // ==========================================
+        for (uint32_t start : node_set)
+        {
+            if (!used.count(start) && !used.count(start ^ 1))
+            {
+                vector<uint32_t> path = extract_path_forward(start);
+                uint32_t path_length = get_path_length(path);
+
+                
+                if (path_length >= 1000000)
+                {
+                    hap_chain_result_t result;
+                    result.begin = path.front();
+                    result.end = path.back();
+                    result.hap_path = path;
+                    chain_result.push_back(result);
+                }
+            }
+        }
+
+        // ==========================================
+        // Step 4: 打印孤立点 / 未访问节点
+        // ==========================================
+        vector<uint32_t> unvisited_nodes;
+        for (uint32_t node : node_set)
+        {
+            if (!used.count(node) && !used.count(node ^ 1))
+            {
+                cout << "[Unvisited Warning] Leftover node in chain " << chain_idx << ": "
+                     << g->seq[node >> 1].name << (node & 1 ? "-" : "+")
+                     << " (ID: " << node << ")"
+                     << " | node_type: " << node_type[node] << endl;
+                unvisited_nodes.push_back(node);
+            }
+        }
+        unvisited_nodes_global.push_back(unvisited_nodes);
+        // ==========================================
+        // Step 5: 调用外部序列生成函数
+        // ==========================================
         if (chain_result.size() > 0)
         {
             sequence_hap_chains(g, chain_result, node_type);
-            cerr << "Finish one chain : " << chain_result[0].hap_sequence.length() << " bp" << endl;
+            cerr << "[Success] Finished exporting one chain. Total length: " << chain_result[0].hap_sequence.length() << " bp\n"
+                 << endl;
             hap_results_debug.push_back(chain_result);
         }
     }
@@ -4162,6 +4688,110 @@ find_longest_paths_from_type3_nodes(
 
     return result;
 }
+
+map<uint32_t, map<uint32_t, set<uint32_t>>> *phasing_plant_version(asg_t *g, string output_directory, uint32_t **connection_forward, uint32_t **connection_backward)
+{
+    // define
+    uint32_t **connections_count;
+    uint32_t n_vtx = g->n_seq * 2;
+    CALLOC(connections_count, g->n_seq);
+    for (int i = 0; i < g->n_seq; i++)
+    {
+        CALLOC(connections_count[i], g->n_seq);
+        memset(connections_count[i], 0, sizeof(*connections_count[i]));
+    }
+    for (int i = 0; i < g->n_seq; i++)
+    {
+        for (int j = 0; j < g->n_seq; j++)
+        {
+            connections_count[i][j] = connection_forward[i][j] + connection_backward[i][j];
+            connections_count[i][j] += connection_forward[j][i] + connection_backward[j][i];
+        }
+    }
+    //................................测试coverage 影响.....................................................
+
+    int coverage[n_vtx];
+    // analyze_coverage(g, coverage, n_vtx);
+    //...................................初始化bubble信息...........................................
+    cout << "start get bubbles" << endl;
+    deduplicate_outgoing_arcs_safe(g);
+
+    int node_type[n_vtx]; // Node type array
+    node_type_global = (int *)calloc(n_vtx, sizeof(int));
+    int node_type2[n_vtx];
+    vector<bubble_t *> bubble_by_ending_begining[n_vtx];
+    vector<bubble_t *> bubbles;
+    Get_bubble(g, bubbles, bubble_by_ending_begining, node_type);
+
+    std::vector<std::set<uint32_t>> hap_chains;
+    std::vector<std::set<uint32_t>> filtered_components;
+    auto components = find_connected_components_debug_plants(g, hap_chains, filtered_components, node_type);
+
+    // 清理输出目录并重新创建
+    system((string("rm -r ") + output_directory).c_str());
+    mkdir(output_directory.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+
+    // TODO: hap_chains 存储了hap ， components 存了正常 chains
+    node_type_global = node_type;
+    hap_chains_global = hap_chains;
+    find_all_paths_in_hap_chains_plant(g, hap_chains_global, node_type, output_directory);
+
+    // 1. 记录所有已经被 hap_chains 消耗掉的序列索引 (seq ID = node >> 1)
+    std::unordered_set<uint32_t> used_seq_indices;
+    for (const auto &chain : hap_chains_global)
+    {
+        for (uint32_t node : chain)
+        {
+            used_seq_indices.insert(node >> 1);
+        }
+    }
+
+    // 2. 准备输出文件
+    string scaffold_fa_path = output_directory + "/scaffold.fa";
+    string scaffold_txt_path = output_directory + "/scaffold_path.txt";
+    std::ofstream scaf_fa_out(scaffold_fa_path);
+    std::ofstream scaf_txt_out(scaffold_txt_path);
+
+    if (!scaf_fa_out.is_open() || !scaf_txt_out.is_open())
+    {
+        std::cerr << "[ERROR] Cannot open scaffold output files in: " << output_directory << std::endl;
+    }
+    else
+    {
+        int single_utg_counter = 1;
+
+        // 3. 遍历全图所有序列，把漏网之鱼抓出来
+        for (uint32_t i = 0; i < (uint32_t)g->n_seq; ++i)
+        {
+            // 如果这个序列没被用过
+            if (used_seq_indices.find(i) == used_seq_indices.end())
+            {
+                string seq_name = "scaffold_singleton_" + to_string(single_utg_counter);
+                string utg_name = string(g->seq[i].name);
+
+                // 获取序列，如果没有序列内容则填空字符串防崩
+                string seq_str = (g->seq[i].seq) ? string(g->seq[i].seq) : "";
+
+                // 写入 FASTA (scaffold.fa)
+                scaf_fa_out << ">" << seq_name << "\n"
+                            << seq_str << "\n";
+
+                // 写入 TXT (scaffold_path.txt)，默认标记为正向连入
+                scaf_txt_out << seq_name << ": " << utg_name << "+\n";
+
+                single_utg_counter++;
+            }
+        }
+
+        scaf_fa_out.close();
+        scaf_txt_out.close();
+        std::cout << "[INFO] Exported " << (single_utg_counter - 1) << " unphased/single-node utgs to " << scaffold_fa_path << " and " << scaffold_txt_path << std::endl;
+    }
+    // =========================================================================
+
+    exit(0);
+}
+
 std::vector<uint32_t> missing_nodes;
 map<uint32_t, map<uint32_t, set<uint32_t>>> *phasing_10_7(asg_t *g, string output_directory, uint32_t **connection_forward, uint32_t **connection_backward)
 {
@@ -4199,6 +4829,20 @@ map<uint32_t, map<uint32_t, set<uint32_t>>> *phasing_10_7(asg_t *g, string outpu
 
     std::vector<std::set<uint32_t>> hap_chains;
     std::vector<std::set<uint32_t>> filtered_components;
+
+    // cout << "node type 4: " << endl;
+    // for (uint32_t i = 0; i < n_vtx; i++)
+    // {
+    //     if (asg_arc_n(g, i) == 1 && asg_arc_n(g, i ^ 1) == 1)
+    //     {
+    //         if (node_type[i] == 0)
+    //         {
+    //             node_type[i] = 4;
+    //             cout << g->seq[i >> 1].name << " ";
+    //         }
+    //     }
+    // }
+    // cout << endl;
     auto components = find_connected_components_debug(g, hap_chains, filtered_components, node_type);
     std::unordered_set<uint32_t> allowed_nodes;
     for (const auto &comp : components)
@@ -4586,10 +5230,10 @@ map<uint32_t, map<uint32_t, set<uint32_t>>> *phasing_10_7(asg_t *g, string outpu
     {
         if (all_nodes.find(i) == all_nodes.end())
         {
-            if (std::find(missing_nodes.begin(), missing_nodes.end(), i >> 1) == missing_nodes.end()){
-                missing_nodes.push_back(i>>1);
+            if (std::find(missing_nodes.begin(), missing_nodes.end(), i >> 1) == missing_nodes.end())
+            {
+                missing_nodes.push_back(i >> 1);
             }
-            
         }
     }
     uint32_t missing_length = 0;
@@ -4597,8 +5241,8 @@ map<uint32_t, map<uint32_t, set<uint32_t>>> *phasing_10_7(asg_t *g, string outpu
     std::cout << "Missing Nodes (" << missing_nodes.size() << "): ";
     for (size_t i = 0; i < missing_nodes.size(); i++)
     {
-        std::cout << g->seq[missing_nodes[i]>>1].name;
-        missing_length += g->seq[missing_nodes[i]>>1].len;
+        std::cout << g->seq[missing_nodes[i] >> 1].name;
+        missing_length += g->seq[missing_nodes[i] >> 1].len;
         if (i + 1 < missing_nodes.size())
             std::cout << ",";
     }
