@@ -6,7 +6,7 @@ By uniquely integrating the synergistic features of both **graph-based** and **s
 
 ### 🎯 Primary Application
 HapFold is primarily designed for **diploid genome scaffolding** using Hi-C data. It seamlessly integrates with `hifiasm` outputs and requires three primary GFA files from the initial assembly:
-1. Unphased unitig graph (`*.r_utg.gfa`)
+1. Unphased unitig graph (`*.p_utg.gfa`)
 2. Haplotype 1 contig graph (`*.hap1.p_ctg.gfa`)
 3. Haplotype 2 contig graph (`*.hap2.p_ctg.gfa`)
 
@@ -48,12 +48,12 @@ Commands:
 ### Step 1: Hi-C Mapping (`hic_mapping`)
 Before mapping, you need to extract the node sequences from your hifiasm unitig graph into a FASTA file:
 ```bash
-awk '/^S/{print ">"$2;print $3}' hifiasm_r_utg.gfa > hifiasm_r_utg.fa
+awk '/^S/{print ">"$2;print $3}' hifiasm_p_utg.gfa > hifiasm_p_utg.fa
 ```
 
 Then, map the raw Hi-C reads to these node sequences:
 ```bash
-HapFold hic_mapping -t 32 -o map.out hifiasm_r_utg.fa hic.R1.fastq.gz hic.R2.fastq.gz
+HapFold hic_mapping -t 32 -o map.out hifiasm_p_utg.fa hic.R1.fastq.gz hic.R2.fastq.gz
 ```
 
 **Key Options for `hic_mapping`:**
@@ -69,7 +69,7 @@ HapFold hic_mapping -t 32 -o map.out hifiasm_r_utg.fa hic.R1.fastq.gz hic.R2.fas
 Once the mapping is complete, use the mapping results alongside the GFA files to resolve haplotypes and build chromosome-scale scaffolds.
 
 ```bash
-HapFold resolve_haplotypes -t 32 -n chr -u utg_ctg_mappings.csv -i true map.out hifiasm_r_utg.gfa output_dir -1 hap1.p_ctg.gfa -2 hap2.p_ctg.gfa
+HapFold resolve_haplotypes -t 32 -n chr -u utg_ctg_mappings.csv -i true map.out hifiasm_p_utg.gfa output_dir -1 hap1.p_ctg.gfa -2 hap2.p_ctg.gfa
 ```
 *(Positional arguments: `<mapping_result> <unitig.gfa> <output_directory>`)*
 
