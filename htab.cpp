@@ -45,11 +45,9 @@ yak_ch_t *yak_ch_init(int k, int pre, int n_hash, int n_shift)
 
 //     for (i = 0; i < 1<<h->pre; ++i) {
 //         h->h[i].h = yak_ht_init();
-//         // 获取哈希表的初始桶数 (Capacity)
-//         // kh_capacity 是 khashl 提供的宏，返回当前哈希表数组的总长度
 //         uint64_t capacity = kh_capacity(h->h[i].h);
 //         if (capacity > 0) {
-//             CALLOC(h->h[i].pos, capacity); // 分配对应大小的内存
+//             CALLOC(h->h[i].pos, capacity); 
 //         }
 //     }
 
@@ -203,7 +201,6 @@ extern std::string decode_kmer(uint64_t x, int k); // 声明decode_kmer
 
 // 			if (ins)
 // 			{
-// 				// 插入 kmer 本体 + r[j] + forward mask
 // 				k = yak_ht_put(g->h, x << YAK_COUNTER_BITS, &absent);
 // 				if (absent)
 // 				{
@@ -225,25 +222,20 @@ extern std::string decode_kmer(uint64_t x, int k); // 声明decode_kmer
 // 					// 	uint16_t utg = get_k & YAK_KEY_MASK;
 // 					// 	// std::cout << "utg=" << utg << std::endl;
 // 					// }
-// 					// kmer 本体 (高位去掉计数位)
 // 					uint64_t kmer = key_h >> YAK_COUNTER_BITS;
 // 					std::string kmer_str_in_h = decode_kmer(kmer, k);
 // 					// printf("raw_key=%lu, kmer_code=%lu, kmer=%s\n",
 // 					// 	   key_h, kmer, kmer_str_in_h.c_str());
-// 					// read id（在低位的 KEY_MASK 范围里）
 // 					uint64_t read_id = key_h & YAK_KEY_MASK;
 
-// 					// 是否 forward
 // 					bool is_forward = key_h & YAK_FORWARD_MASK;
 
-// 					// 是否重复
 // 					bool is_repeat = key_h & YAK_REPEAT_MASK;
 // 					std::string kmer_str = decode_kmer(a[j], h->k);
 // 					// std::cout << a[j] << std::endl;
 // 					// printf("pos=%u, readID=%lu, forward=%d, repeat=%d\n",
 // 					// pos[j], read_id, is_forward, is_repeat);
 // 					//...
-// 					//  插入位置信息
 // 					int absent1;
 // 					k_pos = yak_ht_put(g_pos->h, x2 << 30, &absent1);
 // 					// std::cout << absent1 << std::endl;
@@ -317,38 +309,28 @@ int yak_ch_insert_list_kmer_full(yak_ch_t *h,
 
 			if (ins)
 			{
-				// 1. 插入 K-mer 的 Key
 				k = yak_ht_put(g->h, x << YAK_COUNTER_BITS, &absent);
 
 				if (absent)
 				{
 					++n_ins;
-					// 记录 read ID
 					kh_key(g->h, k) |= r[j];
-					// 记录方向
 					if (f[j])
 					{
 						kh_key(g->h, k) |= YAK_FORWARD_MASK;
 					}
 
-					// --- 核心修改在这里 ---
 					// 2. 直接将 position 作为 Value 存入自带的 kh_val 中！
 					kh_val(g->h, k) = (pos[j] & YAK_POS_MASK);
-					// // ==========================================
-					// // 添加在这里：【存入测试输出】
-					// // ==========================================
 					// static int debug_ins_cnt = 0;
 					// // if (debug_ins_cnt < 20)
 					// {
-					// 	// 1. 打印刚存入的原始数据
 					// 	printf("[DEBUG-INSERT] Inserted -> HashKey: %lu | Contig ID: %u | Pos: %u | Forward: %d\n",
 					// 		   (unsigned long)a[j], (unsigned)r[j], (unsigned)pos[j], (int)f[j]);
 					// 	std::cout << "kmer=" << decode_kmer(a[j], 31) << std::endl;
-					// 	// 2. 立即调用查询函数，测试是否能正确取出
 					// 	uint32_t test_retrieved_pos = 0;
 					// 	uint16_t test_retrieved_id = yak_ch_get_pos_1(h, a[j], &test_retrieved_pos);
 
-					// 	// 3. 打印取出的数据，进行比对
 					// 	printf("[DEBUG-VERIFY] Retrieved -> Contig ID: %u | Pos: %u\n\n",
 					// 		   (unsigned)test_retrieved_id, (unsigned)test_retrieved_pos);
 
@@ -364,7 +346,6 @@ int yak_ch_insert_list_kmer_full(yak_ch_t *h,
 		}
 		else
 		{
-			// 如果 create_new 为 0 的逻辑（视你原始代码需求而定）
 			k = yak_ht_get(g->h, x << YAK_COUNTER_BITS);
 			if (k != kh_end(g->h) && ((kh_key(g->h, k) & YAK_KEY_MASK) ^ r[j]) != 0)
 				kh_key(g->h, k) |= YAK_REPEAT_MASK;
@@ -450,7 +431,6 @@ uint16_t yak_ch_get_pos_1(const yak_ch_t *h, uint64_t x, uint32_t *pos)
 
 	k = yak_ht_get(g, x >> h->pre << YAK_COUNTER_BITS);
 
-	// 如果没找到，或者是 repeat，直接返回 65535
 	if (k == kh_end(g) || (kh_key(g, k) & YAK_REPEAT_MASK) != 0)
 	{
 		return 65535;
@@ -458,8 +438,6 @@ uint16_t yak_ch_get_pos_1(const yak_ch_t *h, uint64_t x, uint32_t *pos)
 
 	uint16_t id = kh_key(g, k) & YAK_KEY_MASK;
 
-	// --- 核心提取逻辑 ---
-	// 直接取出绑定的 Value 作为 pos
 	(*pos) = kh_val(g, k);
 
 	return id;

@@ -38,7 +38,7 @@ typedef struct
 	uint64_t *a;
 	uint64_t *r;
 	bool *f;
-	uint32_t *pos; // 新增：记录kmer首个碱基在序列中的位置
+	uint32_t *pos;
 } ch_buf_t;
 
 void printBits(size_t const size, void const *const ptr)
@@ -64,7 +64,7 @@ typedef struct
 	int create_new;
 	kseq_t *ks;
 	yak_ch_t *h;
-	// yak_ch_t *h_pos; // 新增：专门存pos的哈希表
+	// yak_ch_t *h_pos; 
 	uint64_t global_counter;
 	int seg_n;
 	std::vector<char *> *names;
@@ -86,7 +86,7 @@ static void worker_for(void *data, long i, int tid) // callback for kt_for()
 {
 	stepdat_t *s = (stepdat_t *)data;
 	yak_ch_t *h = s->p->h;
-	// yak_ch_t *h_pos = s->p->h_pos; // 新增
+	// yak_ch_t *h_pos = s->p->h_pos; 
 	ch_buf_t *b = &s->buf[i];
 
 	// b->n_ins += yak_ch_insert_list_kmer_full(h, h_pos, s->p->create_new, b->n, b->a, b->r, b->pos, b->f, i);
@@ -122,7 +122,7 @@ typedef struct
 	double ratio_thres;
 	bseq_file_t *fp;
 	yak_ch_t *ch;
-	// yak_ch_t *h_pos; // 新增
+	// yak_ch_t *h_pos; 
 	tb_buf_t *buf;
 	std::vector<mapping_res_t> *mappings;
 	int record_num;
@@ -135,8 +135,8 @@ typedef struct
 	bseq_file_t *fp;
 	yak_ch_t *ch1;
 	yak_ch_t *ch2;
-	yak_ch_t *h_pos1; // 新增
-	yak_ch_t *h_pos2; // 新增
+	yak_ch_t *h_pos1;
+	yak_ch_t *h_pos2;
 	tb_buf_t *buf;
 	std::vector<mapping_res_t> *mappings;
 	vector<char *> *contigs_names_hap1;
@@ -169,21 +169,21 @@ std::string decode_kmer(uint64_t x, int k);
 std::string decode_kmer(uint64_t x, int k)
 {
 	static const char nt4[] = {'A', 'C', 'G', 'T'};
-	std::string kmer(k, 'A'); // 初始化为长度为 k 的字符串
+	std::string kmer(k, 'A'); 
 	for (int i = 0; i < k; ++i)
 	{
-		kmer[k - i - 1] = nt4[x & 0x3]; // 取出最后两位并转换为字符
-		x >>= 2;						// 向右移动两位，处理下一对二进制位
+		kmer[k - i - 1] = nt4[x & 0x3]; 
+		x >>= 2;						
 	}
 	return kmer;
 }
 struct ReadState
 {
-	int last_q_pos = -1; // 上一次 query kmer 的 start pos（在 query read 中）
-	int last_t_pos = -1; // 上一次 target pos（在目标 read 中）
+	int last_q_pos = -1; 
+	int last_t_pos = -1; 
 	bool has_last = false;
 	bool last_forward = false;
-	int consist_count = 0; // 本 read 上被判为一致（monotonic + distance ok）的次数
+	int consist_count = 0; 
 };
 
 typedef struct
@@ -222,7 +222,6 @@ void load_node_type_csv(const char *csv_filename, std::unordered_map<int, int> &
 		if (line.empty())
 			continue;
 
-		// 如果CSV第一行是表头，跳过
 		if (first_line && (line.find("node") != std::string::npos || line.find("Node") != std::string::npos))
 		{
 			first_line = false;
@@ -250,17 +249,6 @@ void load_node_type_csv(const char *csv_filename, std::unordered_map<int, int> &
 	fin.close();
 }
 
-// 一个桶 b 其实是一个 动态数组，数组大小 = b->m，当前已用 = b->n。
-
-// 桶里每条记录存了一行信息：
-
-// a：k-mer 的哈希值（uint64_t）
-
-// f：这个 k-mer 是 forward 还是 reverse（布尔）
-
-// pos：k-mer 在原序列中的位置（uint32_t）
-
-// r：这个 k-mer 属于哪条 read（seq_id）
 static inline void ch_insert_buf(ch_buf_t *buf, int p, uint64_t y, uint64_t seq_id, bool f, uint32_t kmer_pos)
 {
 	int pre = y & ((1 << p) - 1);
@@ -271,12 +259,12 @@ static inline void ch_insert_buf(ch_buf_t *buf, int p, uint64_t y, uint64_t seq_
 		REALLOC(b->a, b->m);
 		REALLOC(b->r, b->m);
 		REALLOC(b->f, b->m);
-		REALLOC(b->pos, b->m); // 新增
+		REALLOC(b->pos, b->m);
 	}
 	b->a[b->n] = y;
 	b->f[b->n] = f;
 	// std::cout << "kmer: " << decode_kmer(y, 31) << " pos: " << kmer_pos << " seq_id: " << seq_id << std::endl;
-	b->pos[b->n] = kmer_pos; // 新增
+	b->pos[b->n] = kmer_pos; 
 	b->r[b->n++] = seq_id;
 }
 
@@ -296,9 +284,6 @@ static void count_seq_buf(ch_buf_t *buf, int k, int p, int len, const char *seq,
 			{ // we find a k-mer
 				f = x[0] < x[1];
 				uint64_t y = f ? x[0] : x[1];
-				// // ==========================================
-				// // 添加在这里：【哈希之前的真实 K-mer 测试输出】
-				// // ==========================================
 				// uint64_t hashed_y = yak_hash64(y, mask);
 				// static int debug_raw_cnt = 0;
 				// // if (debug_raw_cnt < 20) {
@@ -310,7 +295,7 @@ static void count_seq_buf(ch_buf_t *buf, int k, int p, int len, const char *seq,
 				// debug_raw_cnt++;
 				// // }
 				// // ==========================================
-				ch_insert_buf(buf, p, yak_hash64(y, mask), seq_id, f, i - k + 1); // 新增参数
+				ch_insert_buf(buf, p, yak_hash64(y, mask), seq_id, f, i - k + 1); 
 			}
 		}
 		else
@@ -334,7 +319,7 @@ static void count_seq_buf_long(ch_buf_t *buf, int k, int p, int len, const char 
 			x[3] = x[3] >> 1 | (uint64_t)(1 - (c >> 1)) << shift;
 			uint64_t y = f ? x[0] : x[1];
 			if (++l >= k)
-				ch_insert_buf(buf, p, yak_hash64(y, mask), seq_id, f, i - k + 1); // 新增参数
+				ch_insert_buf(buf, p, yak_hash64(y, mask), seq_id, f, i - k + 1); 
 		}
 		else
 			l = 0, x[0] = x[1] = x[2] = x[3] = 0; // if there is an "N", restart
@@ -391,7 +376,7 @@ static void *worker_pipeline(void *data, int step, void *in) // callback for kt_
 			MALLOC(s->buf[i].a, m);
 			MALLOC(s->buf[i].r, m);
 			MALLOC(s->buf[i].f, m);
-			MALLOC(s->buf[i].pos, m); // 新增：分配pos数组
+			MALLOC(s->buf[i].pos, m); 
 		}
 		for (i = 0; i < s->n; ++i)
 		{
@@ -418,7 +403,7 @@ static void *worker_pipeline(void *data, int step, void *in) // callback for kt_
 			free(s->buf[i].a);
 			free(s->buf[i].r);
 			free(s->buf[i].f);
-			free(s->buf[i].pos); // 新增：释放pos数组
+			free(s->buf[i].pos); 
 		}
 		p->h->tot += n_ins;
 		free(s->buf);
@@ -449,7 +434,7 @@ pldat_t *yak_count_multi_new(const char *fn, const yak_copt_t *opt, yak_ch_t *h0
 		pl->create_new = 1;
 		pl->h = yak_ch_init(opt->k, opt->pre, opt->bf_n_hash, opt->bf_shift);
 	}
-	// pl->h_pos = yak_ch_init(opt->k, 30, opt->bf_n_hash, opt->bf_shift); // 新增：初始化存pos的哈希表
+	// pl->h_pos = yak_ch_init(opt->k, 30, opt->bf_n_hash, opt->bf_shift); 
 	pl->names = new std::vector<char *>();
 
 	kt_pipeline(3, worker_pipeline, pl, 3);
@@ -471,7 +456,7 @@ static void tb_worker(void *_data, long k, int tid)
 	std::map<uint16_t, int> counts;
 	std::map<uint16_t, bool> forward;
 	std::map<uint16_t, uint32_t> positions;
-	// yak_ch_t *h_pos = aux->h_pos; // 新增
+	// yak_ch_t *h_pos = aux->h_pos; 
 	// cout << "Processing read: " << s->name << endl;
 	std::map<int, std::vector<Tread2shapmers>> read2hapmers;
 	if (aux->ch->k < 32)
@@ -540,20 +525,14 @@ static void tb_worker(void *_data, long k, int tid)
 					uint32_t pos = -1;
 					// cout<<y<<endl;
 					uint16_t read_id = yak_ch_get_pos_1(aux->ch, y, &pos);
-					// // ==========================================
-					// // 添加在这里：【取出测试输出】
-					// // ==========================================
-					// // 加一个锁或简单的原子操作防止多线程打印错乱（这里为了简单直接用静态变量拦截）
-					// if (pos != 65535) // 只打印成功匹配到位置的 k-mer
+					// if (pos != 65535) 
 					// {
 					// 	static int debug_get_cnt = 0;
 					// 	if (debug_get_cnt < 20)
 					// 	{
-					// 		// 使用原有的 decode_kmer 还原 x[0] 为字符串序列
 					// 		printf("[DEBUG-GET] Queried k-mer: %s | Retrieved Contig ID: %u | Retrieved Pos: %u\n",
 					// 			   decode_kmer(x[0], aux->ch->k).c_str(), (unsigned)read_id, (unsigned)pos);
 
-					// 		// 这里加一个 gcc 内置的原子加法，防止多线程把计数器搞崩
 					// 		__sync_fetch_and_add(&debug_get_cnt, 1);
 					// 	}
 					// }
@@ -571,10 +550,10 @@ static void tb_worker(void *_data, long k, int tid)
 						int target_id = res & YAK_KEY_MASK; // target_id
 
 						Tread2shapmers hap;
-						hap.hapmer = x[0];											  // query kmer 的序列
-						hap.qposi = l - aux->ch->k;									  // query kmer 在 read 上的位置
-						hap.tposi = pos;											  // target 上的位置（来自 yak_ch_get_pos）
-						hap.strand = !(((res & YAK_FORWARD_MASK) != 0) ^ is_forward); // 相同为1，不同为0
+						hap.hapmer = x[0];											
+						hap.qposi = l - aux->ch->k;									  
+						hap.tposi = pos;											  
+						hap.strand = !(((res & YAK_FORWARD_MASK) != 0) ^ is_forward);
 						read2hapmers[target_id].push_back(hap);
 						// printf("Found hapmer: %lu, QPos: %d, TPos: %d, Strand: %d, TargetID: %d\n",
 						// 	   hap.hapmer, hap.qposi, hap.tposi, hap.strand, target_id);
@@ -608,11 +587,9 @@ static void tb_worker(void *_data, long k, int tid)
 		{
 			continue;
 		}
-		// 计算相同 strand 和不同 strand 的数量
 		int num_same_strand = 0;
 		int num_diff_strand = 0;
 
-		// 遍历 shapmers，统计相同和不同 strand 的数量
 		for (const Tread2shapmers &shapmer : shapmers)
 		{
 			if (shapmer.strand == 1)
@@ -624,11 +601,9 @@ static void tb_worker(void *_data, long k, int tid)
 				num_diff_strand++;
 			}
 		}
-		// 确定是同向比对，还是反向互补的比对上
 		int strand = (num_same_strand > num_diff_strand) ? 1 : 0;
 
 		std::vector<Tread2shapmers> strand_correct_shapmers;
-		// 遍历 shapmers，只挑出正确比对方向的hamper，过滤掉错误噪音
 		for (const Tread2shapmers &shapmer : shapmers)
 		{
 			if (shapmer.strand == strand)
@@ -636,18 +611,17 @@ static void tb_worker(void *_data, long k, int tid)
 				strand_correct_shapmers.push_back(shapmer);
 			}
 		}
-		// 统计符合 strand 的 hapmers 数量
 		int num_strand_correct_shapmers = strand_correct_shapmers.size();
 		if (num_strand_correct_shapmers < min_num_shapmers)
 		{
 			continue;
 		}
 		std::vector<Tread2shapmers> posi_correct_shapmers;
-		int n = 3;		 // 使用 n 个下一个 hapmers 来判断当前 hapmer
-		int shift = 200; // 允许的最大位置偏移
+		int n = 3;		 
+		int shift = 200; 
 		if (num_strand_correct_shapmers >= 2 * n)
 		{
-			if (strand == 1) // 相同的 strand
+			if (strand == 1) 
 			{
 				for (int i = 0; i <= num_strand_correct_shapmers - n - 1; ++i)
 				{
@@ -672,13 +646,12 @@ static void tb_worker(void *_data, long k, int tid)
 						}
 					}
 
-					if (score > 0) // 认为这个 hapmer 是可信的，否则移除
+					if (score > 0) 
 					{
 						posi_correct_shapmers.push_back(strand_correct_shapmers[i]);
 					}
 				}
 
-				// 处理最后几个 hapmers（这些 hapmers 没有 n 个后续 hapmers 来判断）
 				for (int i = num_strand_correct_shapmers - n; i < num_strand_correct_shapmers; ++i)
 				{
 					const auto &hapmer_i = strand_correct_shapmers[i];
@@ -709,7 +682,7 @@ static void tb_worker(void *_data, long k, int tid)
 				}
 			}
 			//
-			else // 不相同的 strand
+			else
 			{
 				for (int i = 0; i <= num_strand_correct_shapmers - n - 1; ++i)
 				{
@@ -736,14 +709,13 @@ static void tb_worker(void *_data, long k, int tid)
 						}
 					}
 
-					if (score > 0) // 认为这个 hapmer 是可信的，否则移除
+					if (score > 0)
 					{
 						// cout<<"Accepted hapmer: "<<strand_correct_shapmers[i].hapmer<<", QPos: "<<strand_correct_shapmers[i].qposi<<", TPos: "<<strand_correct_shapmers[i].tposi<<", Strand: "<<strand_correct_shapmers[i].strand<<endl;
 						posi_correct_shapmers.push_back(strand_correct_shapmers[i]);
 					}
 				}
 
-				// 处理最后几个 hapmers（这些 hapmers 没有 n 个后续 hapmers 来判断）
 				for (int i = num_strand_correct_shapmers - n; i < num_strand_correct_shapmers; ++i)
 				{
 					const auto &hapmer_i = strand_correct_shapmers[i];
@@ -776,7 +748,7 @@ static void tb_worker(void *_data, long k, int tid)
 		}
 		else if (num_strand_correct_shapmers >= 2 && num_strand_correct_shapmers < 2 * n)
 		{
-			if (strand == 1) // 相同的 strand
+			if (strand == 1) 
 			{
 				for (int i = 0; i < num_strand_correct_shapmers; ++i)
 				{
@@ -826,7 +798,7 @@ static void tb_worker(void *_data, long k, int tid)
 					}
 				}
 			}
-			else // 不同的 strand
+			else 
 			{
 				for (int i = 0; i < num_strand_correct_shapmers; ++i)
 				{
@@ -885,7 +857,7 @@ static void tb_worker(void *_data, long k, int tid)
 		{
 			continue;
 		}
-		int num_nonovlp_shapmers = 1; // 初始值为 1，考虑第一个 hapmer
+		int num_nonovlp_shapmers = 1; 
 		for (size_t i = 0; i < posi_correct_shapmers.size() - 1; ++i)
 		{
 			const Tread2shapmers &hapmer1 = posi_correct_shapmers[i];
@@ -900,7 +872,6 @@ static void tb_worker(void *_data, long k, int tid)
 			// 	 << ", TPos: " << hapmer1.tposi
 			// 	 << ", Strand: " << hapmer1.strand << "\n";
 
-			// 检查相邻 hapmers 是否满足距离要求
 			if (std::abs(qposi2 - qposi1) >= aux->ch->k && std::abs(tposi2 - tposi1) >= aux->ch->k)
 			{
 				num_nonovlp_shapmers++;
@@ -996,7 +967,7 @@ void do_mapping2(pldat_t *pl, bseq_file_t *hic_fn1, bseq_file_t *hic_fn2, char *
 	aux.ratio_thres = 0.33;
 	aux.k = pl->h->k;
 	aux.ch = pl->h;
-	// aux.h_pos = pl->h_pos; // 新增
+	// aux.h_pos = pl->h_pos; 
 	aux.record_num = pl->global_counter;
 	cout << "Start mapping, total unitig number: " << aux.record_num << endl;
 	aux.fp = hic_fn1;
@@ -1104,7 +1075,6 @@ void do_mapping2(pldat_t *pl, bseq_file_t *hic_fn1, bseq_file_t *hic_fn2, char *
 
 			if (gid1 != 0 && gid2 != 0 && gid1 != gid2)
 			{
-				// 两个都不为0且不相等 → 跳过
 				++skipped_count;
 				continue;
 			}
@@ -1180,21 +1150,18 @@ void do_mapping2(pldat_t *pl, bseq_file_t *hic_fn1, bseq_file_t *hic_fn2, char *
 
 int main_poreC_map_test(int argc, char *argv[])
 {
-	pldat_t *h;		  // 存储Hi-C数据的处理状态及信息
-	int c;			  // 处理命令行参数
-	char *fn_out = 0; // 输出文件名
+	pldat_t *h;		 
+	int c;			 
+	char *fn_out = 0;
 	// char *gfa_filename = NULL; // GFA 文件名
 
-	yak_copt_t opt; // 存储命令行选项和参数的信息
+	yak_copt_t opt; 
 	ketopt_t o = KETOPT_INIT;
 	yak_copt_init(&opt);
 	opt.pre = YAK_COUNTER_BITS;
 	opt.n_thread = 32;
 	char *csv_filename = NULL;
 
-	// =======================
-	// 解析命令行参数
-	// =======================
 	while ((c = ketopt(&o, argc, argv, 1, "k:p:K:t:b:H:o:m:L:c:", 0)) >= 0)
 	{
 		if (c == 'k')
@@ -1219,9 +1186,6 @@ int main_poreC_map_test(int argc, char *argv[])
 		//     gfa_filename = o.arg;
 	}
 
-	// =======================
-	// 参数检查
-	// =======================
 	if (argc - o.ind < 3)
 	{
 		fprintf(stderr, "Usage: pstools porec_mapping [options] query_reads hic_reads_1 hic_reads_2 -g graph.gfa\n");
@@ -1255,22 +1219,16 @@ int main_poreC_map_test(int argc, char *argv[])
 		fprintf(stderr, "WARNING: counts are inexact if -k is greater than 31\n");
 	}
 	cerr << " in main_poreC_map_test" << endl;
-
-	// =======================
-	// 输入文件解析
-	// =======================
-	// char *classpro_fn = argv[o.ind];	  // class 文件
-	char *query_fn = argv[o.ind];		  // query reads
+	// char *classpro_fn = argv[o.ind];	
+	char *query_fn = argv[o.ind];		 
 	char *hic_fn1_name = argv[o.ind + 1]; // Hi-C reads 1
 	char *hic_fn2_name = argv[o.ind + 2]; // Hi-C reads 2
 
-	// // 读取 GFA 文件
 	// asg_t *graph = gfa_read(gfa_filename);
 	// if (graph == NULL) {
 	//     fprintf(stderr, "ERROR: failed to read GFA file: %s\n", gfa_filename);
 	//     return 1;
 	// }
-	// 打开 reads 文件
 	// bseq_file_t *classpro_file = bseq_open(classpro_fn);
 	bseq_file_t *query_read = bseq_open(query_fn);
 	bseq_file_t *hic_fn1 = bseq_open(hic_fn1_name);
@@ -1292,9 +1250,6 @@ int main_poreC_map_test(int argc, char *argv[])
 			 << " node types from " << csv_filename << std::endl;
 	}
 
-	// =======================
-	// Hi-C 处理主逻辑
-	// =======================
 	h = yak_count_multi_new(argv[o.ind], &opt, 0);
 	long peak_bytes = yak_peakrss();
 	double peak_mb = peak_bytes / 1024.0 / 1024.0;

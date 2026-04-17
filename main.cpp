@@ -10,7 +10,7 @@ extern "C"
 #include "bubble_chain.h"
 #include "resolve_repeat_haplotype.h"
 #include "hic_mapping.h"
-#define GraPhaser_VERSION "0.1"
+#define HapFold_VERSION "0.1"
 
 typedef struct
 {
@@ -38,6 +38,25 @@ void destory_opt(ps_opt_t *asm_opt)
 	}
 }
 
+
+struct GlobalParams {
+    int n_threads = 8;
+    string enzymes_unsplit;
+    string identityFile;
+    bool check_identity = false;
+    bool is_plant = false;
+    string contig_hap_file;
+    string utg_ctg_file;
+    string hap1_gfa;
+    string hap2_gfa;
+    int n_chrs = 0; 
+    double hic_scaffold_threshold_ratio = 0.6; 
+    
+    
+    bool debug_mode = false; 
+
+};
+
 static ko_longopt_t long_options[] = {
 	{"version", ko_no_argument, 300},
 	{"write-paf", ko_no_argument, 302},
@@ -45,7 +64,7 @@ static ko_longopt_t long_options[] = {
 
 void Print_H(ps_opt_t *asm_opt)
 {
-	fprintf(stderr, "Usage: GraPhaser [options] <input> <output> <...>\n");
+	fprintf(stderr, "Usage: HapFold [options] <input> <output> <...>\n");
 	fprintf(stderr, "Options:\n");
 	fprintf(stderr, "  Assembly:\n");
 	fprintf(stderr, "    -o FILE       prefix of output files [%s]\n", asm_opt->output_file_name);
@@ -53,11 +72,11 @@ void Print_H(ps_opt_t *asm_opt)
 	fprintf(stderr, "    --version     show version number\n");
 	fprintf(stderr, "    -h            show help information\n");
 
-	fprintf(stderr, "Example: ./GraPhaser bubble_chain myfile.gfa -o []\n");
-	fprintf(stderr, "Example: ./GraPhaser resolve_repeats myfile.gfa [].paf.gz -o []\n");
-	fprintf(stderr, "Example: ./GraPhaser asm_component \n");
-	fprintf(stderr, "Example: ./GraPhaser filter_paf -t[n] myfile.gfa [].paf.gz -o [].paf \n");
-	//fprintf(stderr, "See `man ./GraPhaser.1' for detailed description of these command-line options.\n");
+	fprintf(stderr, "Example: ./HapFold bubble_chain myfile.gfa -o []\n");
+	fprintf(stderr, "Example: ./HapFold resolve_repeats myfile.gfa [].paf.gz -o []\n");
+	fprintf(stderr, "Example: ./HapFold asm_component \n");
+	fprintf(stderr, "Example: ./HapFold filter_paf -t[n] myfile.gfa [].paf.gz -o [].paf \n");
+	//fprintf(stderr, "See `man ./HapFold.1' for detailed description of these command-line options.\n");
 }
 
 static inline int64_t mm_parse_num(const char *str)
@@ -136,78 +155,70 @@ std::vector<NamedBubbleContig> read_named_bubble_contigs(const std::string &file
 int main_resolve_haplotypes(int argc, char *argv[])
 {
     ketopt_t o = KETOPT_INIT;
-    int c, n_threads = 8;
-    string enzymes_unsplit;
-    string identityFile;
-    bool check_identity = false;
-    bool is_plant = false;
-    //......
-    string contig_hap_file;
-    string utg_ctg_file;
-    std::string hap1_gfa, hap2_gfa;
-    //......
-    
-    int n_chrs = 0; 
-    
-    double hic_scaffold_threshold_ratio = 0.6; 
+    int c;
 
-   
+	GlobalParams g_params;
+
+    // 2. 增加 debug 的长参数选项 (代号 302)
     static ko_longopt_t longopts[] = {
         {"hic_scaffold_threshold_ratio", ko_required_argument, 301},
+        {"debug", ko_no_argument, 302}, // 新增：--debug 选项，无须传值
         {0, 0, 0} // 必须以全0结尾
     };
 
-    // 3. 将原本 ketopt 最后一个参数 0 替换为 longopts
-    while ((c = ketopt(&o, argc, argv, 1, "t:e:i:f:1:2:u:c:n:p", longopts)) >= 0)
+    // 3. ketopt 的短参数字符串中加入 'd'，表示支持 -d
+    while ((c = ketopt(&o, argc, argv, 1, "t:e:i:f:1:2:u:c:n:pd", longopts)) >= 0)
     {
         if (c == 't')
-            n_threads = atoi(o.arg);
+            g_params.n_threads = atoi(o.arg);
         else if (c == 'e')
-            enzymes_unsplit = string(o.arg);
+            g_params.enzymes_unsplit = string(o.arg);
         else if (c == 'i')
-            check_identity = (strcmp(o.arg, "true") == 0);
+            g_params.check_identity = (strcmp(o.arg, "true") == 0);
         else if (c == 'f')
-            identityFile = string(o.arg);
+            g_params.identityFile = string(o.arg);
         else if (c == '1')
-            hap1_gfa = std::string(o.arg);
+            g_params.hap1_gfa = string(o.arg);
         else if (c == '2')
-            hap2_gfa = std::string(o.arg);
+            g_params.hap2_gfa = string(o.arg);
         else if (c == 'u')
-            utg_ctg_file = string(o.arg);
+            g_params.utg_ctg_file = string(o.arg);
         else if (c == 'c')
-            contig_hap_file = string(o.arg);
+            g_params.contig_hap_file = string(o.arg);
         else if (c == 'n')
-            n_chrs = atoi(o.arg);
+            g_params.n_chrs = atoi(o.arg);
         else if (c == 'p') 
-            is_plant = true;
-        else if (c == 301) // 4. 捕获长选项返回值 301，并用 atof 解析为 double
-            hic_scaffold_threshold_ratio = atof(o.arg);
+            g_params.is_plant = true;
+        else if (c == 'd' || c == 302) // 4. 捕获 -d 或 --debug
+            g_params.debug_mode = true;
+        else if (c == 301) 
+            g_params.hic_scaffold_threshold_ratio = atof(o.arg);
     }
 
     if (argc - o.ind < 3)
     {
         fprintf(stderr, "\nUsage: GraPhaser resolve_haplotypes [options] <hic_mapping.bam/sam> <assembly.gfa> <output_dir>\n\n");
         fprintf(stderr, "Options:\n");
-        fprintf(stderr, "  -t INT      Number of threads [%d]\n", n_threads);
-        fprintf(stderr, "  -n INT      Expected number of chromosomes (e.g., 78 for chicken) [%d]\n", n_chrs);
-        fprintf(stderr, "  -e STR      Restriction enzymes separated by comma (e.g., GATC,GANTC) [%s]\n", enzymes_unsplit.c_str());
+        fprintf(stderr, "  -t INT      Number of threads [%d]\n", g_params.n_threads);
+        fprintf(stderr, "  -n INT      Expected number of chromosomes (e.g., 78 for chicken) [%d]\n", g_params.n_chrs);
+        fprintf(stderr, "  -e STR      Restriction enzymes separated by comma (e.g., GATC,GANTC) [%s]\n", g_params.enzymes_unsplit.c_str());
         fprintf(stderr, "  -c FILE     Path to contig_hap_nodes.txt (required for Hi-C phasing)\n");
         fprintf(stderr, "  -u FILE     Path to utg_to_ctg relationship file [optional]\n");
         fprintf(stderr, "  -1 FILE     Path to haplotype 1 GFA file (*.hap1.p_ctg.gfa)\n");
         fprintf(stderr, "  -2 FILE     Path to haplotype 2 GFA file (*.hap2.p_ctg.gfa)\n");
-        fprintf(stderr, "  -i BOOL     Enable identity check on contigs (true/false) [%s]\n", (check_identity ? "true" : "false"));
-        fprintf(stderr, "  -f FILE     Precomputed identity file path; if omitted, check will run automatically [%s]\n", identityFile.c_str());
+        fprintf(stderr, "  -i BOOL     Enable identity check on contigs (true/false) [%s]\n", (g_params.check_identity ? "true" : "false"));
+        fprintf(stderr, "  -f FILE     Precomputed identity file path; if omitted, check will run automatically [%s]\n", g_params.identityFile.c_str());
         fprintf(stderr, "  -p          Enable plant mode (uses alternative phasing algorithms) [optional]\n"); 
-        // 5. 在帮助文档中添加该参数的说明
-        fprintf(stderr, "  --hic_scaffold_threshold_ratio FLOAT  Threshold ratio for Hi-C scaffolding [%.2f]\n", hic_scaffold_threshold_ratio);
+        fprintf(stderr, "  -d, --debug Enable debug mode to run test code functions [optional]\n"); // 
+        fprintf(stderr, "  --hic_scaffold_threshold_ratio FLOAT  Threshold ratio for Hi-C scaffolding [%.2f]\n", g_params.hic_scaffold_threshold_ratio);
         fprintf(stderr, "\n");
         return 1;
     }
 
     vector<string> enzymes;
-    if (enzymes_unsplit.size() > 1)
+    if (g_params.enzymes_unsplit.size() > 1)
     {
-        stringstream s_stream(enzymes_unsplit);
+        stringstream s_stream(g_params.enzymes_unsplit);
         while (s_stream.good())
         {
             string substr;
@@ -218,10 +229,10 @@ int main_resolve_haplotypes(int argc, char *argv[])
     }
     std::vector<NamedBubbleContig> named_bubble_contigs;
 
-    if (!contig_hap_file.empty())
+    if (!g_params.contig_hap_file.empty())
     {
-        named_bubble_contigs = read_named_bubble_contigs(contig_hap_file);
-        std::cerr << "[INFO] Loaded " << named_bubble_contigs.size() << " named bubble contigs from " << contig_hap_file << "\n";
+        named_bubble_contigs = read_named_bubble_contigs(g_params.contig_hap_file);
+        std::cerr << "[INFO] Loaded " << named_bubble_contigs.size() << " named bubble contigs from " << g_params.contig_hap_file << "\n";
     }
 
     char *connectionFile = argv[o.ind];
@@ -230,6 +241,7 @@ int main_resolve_haplotypes(int argc, char *argv[])
     printf("start main\n");
     asg_t *graph = gfa_read(gfa_filename);
     map<uint32_t, map<uint32_t, set<uint32_t>>> *bubble_chain_graph = nullptr;
+    
     
     uint32_t **connections_foward;
     CALLOC(connections_foward, graph->n_seq);
@@ -254,9 +266,10 @@ int main_resolve_haplotypes(int argc, char *argv[])
         connections_foward[i][j] = count_forward;
         connections_foward[j][i] = count_forward;
     }
+    
     std::string utg_gfa = std::string(gfa_filename);
 
-    if (is_plant)
+    if (g_params.is_plant)
     {
         printf("[INFO] Plant mode enabled. Using alternative phasing functions.\n");
         bubble_chain_graph = phasing_plant_version(graph, string(output_directory), connections_foward, connections_backward);
@@ -264,16 +277,20 @@ int main_resolve_haplotypes(int argc, char *argv[])
     else
     {
         printf("[INFO] Default mode enabled. Using standard phasing functions.\n");
-
         bubble_chain_graph = phasing_10_7(graph, string(output_directory), connections_foward, connections_backward);
 
-        // 6. 参数已经可以正常传递给你原有的 get_haplotype_path_12_10 函数
-        get_haplotype_path_12_10(connections_foward, connections_backward, graph, bubble_chain_graph,
-                                 output_directory, n_threads, enzymes, identityFile, check_identity,
-                                 utg_ctg_file, hap1_gfa, hap2_gfa, named_bubble_contigs, n_chrs, gfa_filename, hic_scaffold_threshold_ratio);
-		// get_haplotype_path_test_code(connections_foward, connections_backward, graph, bubble_chain_graph,
-		// 							 output_directory, n_threads, enzymes, identityFile, check_identity,
-		// 							 utg_ctg_file, hap1_gfa, hap2_gfa, named_bubble_contigs, n_chrs, gfa_filename);
+        // 5. 根据 g_params.debug_mode 判断执行哪个分支
+        if (g_params.debug_mode) {
+            printf("[INFO] Debug mode enabled. Executing get_haplotype_path_test_code...\n");
+            get_haplotype_path_test_code(connections_foward, connections_backward, graph, bubble_chain_graph,
+                                         output_directory, g_params.n_threads, enzymes, g_params.identityFile, g_params.check_identity,
+                                         g_params.utg_ctg_file, g_params.hap1_gfa, g_params.hap2_gfa, named_bubble_contigs, g_params.n_chrs, gfa_filename, g_params.hic_scaffold_threshold_ratio);
+        } else {
+            printf("[INFO] Executing standard model get_haplotype_path_12_10...\n");
+            get_haplotype_path_12_10(connections_foward, connections_backward, graph, bubble_chain_graph,
+                                     output_directory, g_params.n_threads, enzymes, g_params.identityFile, g_params.check_identity,
+                                     g_params.utg_ctg_file, g_params.hap1_gfa, g_params.hap2_gfa, named_bubble_contigs, g_params.n_chrs, gfa_filename, g_params.hic_scaffold_threshold_ratio);
+        }
     }
     return 0;
 }
@@ -313,7 +330,7 @@ int main_count(int argc, char *argv[])
 	// }
 	// if (argc - o.ind < 1)
 	// {
-	// 	fprintf(stderr, "Usage: GraPhaser count [options] <in.fa> [in.fa]\n");
+	// 	fprintf(stderr, "Usage: HapFold count [options] <in.fa> [in.fa]\n");
 	// 	fprintf(stderr, "Options:\n");
 	// 	fprintf(stderr, "  -k INT     k-mer size [%d]\n", opt.k);
 	// 	fprintf(stderr, "  -p INT     prefix length [%d]\n", opt.pre);
@@ -365,16 +382,11 @@ int main(int argc, char *argv[])
 
 	if (argc == 1)
 	{
-		fprintf(stderr, "Usage: GraPhaser <command> <arguments> <inputs>\n");
+		fprintf(stderr, "Usage: HapFold <command> <arguments> <inputs>\n");
 		fprintf(stderr, "Commands:\n");
-		fprintf(stderr, "  bubble_chain          returns bubble chains from hifi graph using ONT data\n");
-		fprintf(stderr, "  intersect             extract corresponding paf records for sub graph\n");
-		fprintf(stderr, "  resolve_repeat        use ONT data to resolve repeats in hifi graph\n");
 		fprintf(stderr, "  resolve_haplotypes    use hic data to resolve haplotypes\n");
 		fprintf(stderr, "  hic_mapping           map hic data to sequences in the graph\n");
 		fprintf(stderr, "  count                 count k-mers\n");
-		// fprintf(stderr, "  identity_check        generate identity table for contigs\n");
-		fprintf(stderr, "  eval                  evaluate the prediction\n");
 		fprintf(stderr, "  version               print version number\n");
 		return 1;
 	}
@@ -388,7 +400,7 @@ int main(int argc, char *argv[])
 		ret = main_count(argc - 1, argv + 1);
 	else if (strcmp(argv[1], "version") == 0)
 	{
-		printf("gfa.h: %s\nps: %s\n", GraPhaser_VERSION, GraPhaser_VERSION);
+		printf("gfa.h: %s\nps: %s\n", HapFold_VERSION, HapFold_VERSION);
 		return 0;
 	}
 	else
@@ -398,7 +410,7 @@ int main(int argc, char *argv[])
 	}
 	if (ret == 0)
 	{
-		fprintf(stderr, "[M::%s] Version: %s\n", __func__, GraPhaser_VERSION);
+		fprintf(stderr, "[M::%s] Version: %s\n", __func__, HapFold_VERSION);
 		fprintf(stderr, "[M::%s] CMD:", __func__);
 		for (i = 0; i < argc; ++i)
 			fprintf(stderr, " %s", argv[i]);
