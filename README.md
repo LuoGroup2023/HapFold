@@ -1,5 +1,3 @@
-
-```markdown
 # HapFold: Efficient and Accurate Chromosome-Scale Haplotype Reconstruction
 
 **HapFold** is a powerful scaffolding framework designed for the highly accurate, chromosome-scale haplotype reconstruction of diploid genomes. 
