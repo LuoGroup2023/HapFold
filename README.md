@@ -1,90 +1,94 @@
-# Graph-based Chromosome-Scale Phasing and Scaffolding of Diploid Genomes without Reference Guidance
 
-**GraPhaser** is a novel graph-based algorithm designed to integrate **PacBio HiFi** and **Hi-C** data to produce high-resolution, fully phased haplotypes at the chromosome level. By leveraging the connectivity of assembly graphs, GraPhaser achieves base-level resolution for diploid genomes without the need for a reference genome.
+```markdown
+# HapFold: Efficient and Accurate Chromosome-Scale Haplotype Reconstruction
 
-When benchmarking on healthy human genomes (HG002), GraPhaser produced high-quality assemblies with:
+**HapFold** is a powerful scaffolding framework designed for the highly accurate, chromosome-scale haplotype reconstruction of diploid genomes. 
 
-* **Continuity:** NG50 > 130 Mb.
-* **Accuracy:** Switch/Hamming error rates < 1.5%.
-* **Completeness:** > 6.0 Gb.
-* **Efficiency:** Complete processing in under 12 hours (an order of magnitude faster than traditional methods).
+By uniquely integrating the synergistic features of both **graph-based** and **sequence-based** paradigms, HapFold achieves significantly lower misassignment rates and higher computational efficiency than existing methods. Furthermore, when applied to diploid genomes sequenced with standard ONT simplex reads, HapFold enables the robust and scalable reconstruction of a greater number of **near-T2T (telomere-to-telomere)** assemblies.
+
+### 🎯 Primary Application
+HapFold is primarily designed for **diploid genome scaffolding** using Hi-C data. It seamlessly integrates with `hifiasm` outputs and requires three primary GFA files from the initial assembly:
+1. Unphased unitig graph (`*.r_utg.gfa`)
+2. Haplotype 1 contig graph (`*.hap1.p_ctg.gfa`)
+3. Haplotype 2 contig graph (`*.hap2.p_ctg.gfa`)
 
 ---
 
 ## 🛠 Installation
 
-### Prerequisites
+HapFold is extremely lightweight and easy to install.
 
-* G++ (supporting C++11 or later)
-* Zlib
+**Prerequisites:**
+* `g++` (supporting C++11 or later)
+* `zlib`
 
-### Build from Source
+**Build from source:**
+```bash
+git clone [https://github.com/LuoGroup2023/HapFold.git](https://github.com/LuoGroup2023/HapFold.git)
+cd HapFold
+make
+```
+After compilation, the `HapFold` executable binary will be available in the root directory.
 
-```sh
-git clone https://github.com/LuoGroup2023/GraPhaser.git
-cd GraPhaser && make
+---
 
+## 🚀 Quick Start & Workflow
+
+HapFold utilizes a two-step workflow: Mapping and Resolving. 
+
+### General Usage
+```text
+Usage: HapFold <command> <arguments> <inputs>
+
+Commands:
+  resolve_haplotypes    Use Hi-C data to resolve haplotypes and scaffold
+  hic_mapping           Map Hi-C data to sequences in the graph
+  count                 Count k-mers
+  version               Print version number
 ```
 
-After compilation, the executable binary `GraPhaser` will be available in the root directory.
-
----
-
-## 🚀 Execution
-
-GraPhaser follows a two-step workflow to generate fully phased sequences.
-
-### Step 1: Hi-C Mapping to Assembly Graph
-
-First, map the Hi-C reads to the node sequences of the assembly graph (e.g., from `hifiasm`).
-
-> **Note:** You can extract node sequences from a GFA file using:
-> `awk '/^S/{print ">"$2;print $3}' hifiasm_r_utg.gfa > hifiasm_r_utg.fa`
-
-```sh
-# Map Hi-C reads to graph nodes
-GraPhaser hic_mapping -t 32 -o <map.out> <hifiasm_r_utg.fa> <hic.R1.fastq.gz> <hic.R2.fastq.gz>
-
+### Step 1: Hi-C Mapping (`hic_mapping`)
+Before mapping, you need to extract the node sequences from your hifiasm unitig graph into a FASTA file:
+```bash
+awk '/^S/{print ">"$2;print $3}' hifiasm_r_utg.gfa > hifiasm_r_utg.fa
 ```
 
-### Step 2: Haplotype Resolution and Scaffolding
-
-Resolve the assembly graph into distinct haplotypes using the mapping results.
-
-```sh
-# Resolve haplotypes and produce phased sequences
-GraPhaser resolve_haplotypes -t 32 -i true <map.out> <hifiasm_r_utg.gfa> <output_dir>
-
+Then, map the raw Hi-C reads to these node sequences:
+```bash
+HapFold hic_mapping -t 32 -o map.out hifiasm_r_utg.fa hic.R1.fastq.gz hic.R2.fastq.gz
 ```
 
-* **Inputs:** `map.out` (from Step 1), `hifiasm_r_utg.gfa` (hifiasm unitig graph).
-* **Outputs:** Fully phased sequences in `pred_hap1.fa` and `pred_hap2.fa`.
+**Key Options for `hic_mapping`:**
+* `-t INT`: Number of worker threads [32]
+* `-o FILE`: Output file to save the mapping relationships (e.g., `map.out`)
+* `-k INT`: k-mer size [31]
+* `-p INT`: prefix length [22]
+* `-b INT`: set Bloom filter size to `2**INT` bits; `-b 37` is recommended for large/human genomes.
 
 ---
 
-## 📊 Benchmarking Results
+### Step 2: Haplotype Resolution (`resolve_haplotypes`)
+Once the mapping is complete, use the mapping results alongside the GFA files to resolve haplotypes and build chromosome-scale scaffolds.
 
-The following table demonstrates GraPhaser's performance on the **HG002** dataset using OmniC/Arima genomics data:
+```bash
+HapFold resolve_haplotypes -t 32 -n chr -u utg_ctg_mappings.csv -i true map.out hifiasm_r_utg.gfa output_dir -1 hap1.p_ctg.gfa -2 hap2.p_ctg.gfa
+```
+*(Positional arguments: `<mapping_result> <unitig.gfa> <output_directory>`)*
 
-| Dataset | Total Size | CPU Time | NG50 | Quality (QV) |
-| --- | --- | --- | --- | --- |
-| **HG002 (Human)** | ~6.1 Gb | ~5.0 h | **~132 Mb** | **~Q50** |
+**Key Options for `resolve_haplotypes`:**
 
-> For further experiments and reproduction, please refer to `experiments.sh`.
-
----
-
-## ⚠️ Current Limitations
-
-1. **Centromeric Regions:** Current phased sequences do not yet include centromeric regions.
-2. **UL Data:** Integration of Ultra-Long (UL) Nanopore data is not yet implemented.
-3. **Trio-mode:** Future versions will include support for trio-hifiasm graphs.
-
----
-
-<!-- ## 📝 Maintenance
-
-**GraPhaser** is under active development by the **LuoGroup**. We welcome any issues, suggestions, or pull requests.
-
-* **GitHub:** [LuoGroup2023/GraPhaser](https://www.google.com/search?q=https://github.com/LuoGroup2023/GraPhaser)
-* **Author:** Yichen-HNU (lyc) -->
+| Option | Description |
+| :--- | :--- |
+| `-t INT` | Number of threads [8]. |
+| `-n INT` | Expected number of chromosomes (e.g., `46` for human, `78` for chicken) [0]. |
+| `-1 FILE` | **(Required)** Path to haplotype 1 GFA file (`*.hap1.p_ctg.gfa`). |
+| `-2 FILE` | **(Required)** Path to haplotype 2 GFA file (`*.hap2.p_ctg.gfa`). |
+| `-u FILE` | Path to `utg_to_ctg` relationship file. Highly recommended for accurate graph traversing. |
+| `-i BOOL` | Enable identity check on contigs (`true`/`false`) [false]. |
+| `-f FILE` | Precomputed identity file path; if omitted but `-i true`, the check will run automatically. |
+| `-e STR` | Restriction enzymes separated by comma (e.g., `GATC,GANTC`) [ ]. |
+| `-c FILE` | Path to `contig_hap_nodes.txt` (required for specific Hi-C phasing modes). |
+| `-p` | Enable plant mode (uses alternative phasing algorithms optimized for complex genomes). |
+| `-d`, `--debug` | Enable debug mode to run internal test code functions. |
+| `--hic_scaffold_threshold_ratio FLOAT` | Threshold ratio for sequence-based Hi-C scaffolding extensions [0.60]. |
+```
