@@ -7,30 +7,39 @@
 #include <map>
 #include <set>
 #include <vector>
+#include <unordered_map>
 
-#define YAK_MAX_KMER     31
-// #define YAK_COUNTER_BITS 18
+struct RepeatInfo
+{
+	uint64_t read_name; // 或 uint16_t read id
+	uint32_t pos;		// 位置
+	bool forward;		// 方向
+};
+
+extern std::unordered_map<uint64_t, std::vector<RepeatInfo>> repeated_kmers_map;
+
+#define YAK_MAX_KMER 31
 #define YAK_COUNTER_BITS 22
-
+// #define YAK_COUNTER_BITS 18
 #define YAK_POS_ID_BITS 48
 #define YAK_POS_BITS 32
-#define YAK_POS_REPEAT_MASK (1<<(YAK_POS_ID_BITS-1))
-#define YAK_POS_POS_MASK ((1<<(YAK_POS_BITS))-1)
-#define YAK_POS_ID_MASK ((1<<(YAK_POS_ID_BITS))-1-YAK_POS_REPEAT_MASK-YAK_POS_POS_MASK)
+#define YAK_POS_REPEAT_MASK (1 << (YAK_POS_ID_BITS - 1))
+#define YAK_POS_POS_MASK ((1 << (YAK_POS_BITS)) - 1)
+#define YAK_POS_ID_MASK ((1 << (YAK_POS_ID_BITS)) - 1 - YAK_POS_REPEAT_MASK - YAK_POS_POS_MASK)
 
-#define YAK_N_COUNTS     (1<<YAK_COUNTER_BITS)
-#define YAK_MAX_COUNT    ((1<<YAK_COUNTER_BITS)-1)
-#define YAK_REPEAT_MASK    (1<<(YAK_COUNTER_BITS-1))
-#define YAK_FORWARD_MASK    (1<<(YAK_COUNTER_BITS-2))
-#define YAK_KEY_MASK    ((1<<YAK_COUNTER_BITS)- 1 - YAK_REPEAT_MASK - YAK_FORWARD_MASK)
-#define YAK_POS_MASK    ((1<<30)- 1)
+#define YAK_N_COUNTS (1 << YAK_COUNTER_BITS)
+#define YAK_MAX_COUNT ((1 << YAK_COUNTER_BITS) - 1)
+#define YAK_REPEAT_MASK (1 << (YAK_COUNTER_BITS - 1))
+#define YAK_FORWARD_MASK (1 << (YAK_COUNTER_BITS - 2))
+#define YAK_KEY_MASK ((1 << YAK_COUNTER_BITS) - 1 - YAK_REPEAT_MASK - YAK_FORWARD_MASK)
+#define YAK_POS_MASK ((1 << 30) - 1)
+// #define YAK_POS_MASK  ((1ULL<<30) - 1ULL)               // 低 30 位
+#define YAK_BLK_SHIFT 9 // 64 bytes, the size of a cache line
+#define YAK_BLK_MASK ((1 << (YAK_BLK_SHIFT)) - 1)
 
-#define YAK_BLK_SHIFT  9 // 64 bytes, the size of a cache line
-#define YAK_BLK_MASK   ((1<<(YAK_BLK_SHIFT)) - 1)
-
-#define YAK_LOAD_ALL       1
-#define YAK_LOAD_TRIOBIN1  2
-#define YAK_LOAD_TRIOBIN2  3
+#define YAK_LOAD_ALL 1
+#define YAK_LOAD_TRIOBIN1 2
+#define YAK_LOAD_TRIOBIN2 3
 
 #define YAK_MAGIC "YAK\2"
 
@@ -46,7 +55,8 @@ typedef struct
 	int32_t l; // model
 } yak_copt_t;
 
-typedef struct {
+typedef struct
+{
 	int32_t print_each;
 	int32_t min_len;
 	int32_t n_threads;
@@ -55,58 +65,65 @@ typedef struct {
 	int64_t chunk_size;
 } yak_qopt_t;
 
-typedef struct {
+typedef struct
+{
 	int64_t tot;
 	double qv_raw, qv, cov, err;
 	double fpr_lower, fpr_upper;
-	double adj_cnt[1<<YAK_COUNTER_BITS];
+	double adj_cnt[1 << YAK_COUNTER_BITS];
 } yak_qstat_t;
 
-typedef struct {
+typedef struct
+{
 	int n_shift, n_hashes;
 	uint8_t *b;
 } yak_bf_t;
 
 struct yak_ht_t;
 
-typedef struct {
+typedef struct
+{
 	struct yak_ht_t *h;
 	yak_bf_t *b;
-	// uint32_t *pos;
 } yak_ch1_t;
 
-typedef struct {
+typedef struct
+{
 	int k, pre, n_hash, n_shift;
 	uint64_t tot;
 	yak_ch1_t *h;
 } yak_ch_t;
 
-typedef struct{
+typedef struct
+{
 	int n_seq;
-	char** names;
-	yak_ch_t** yak_ch;
+	char **names;
+	yak_ch_t **yak_ch;
 } yak_ch_arr_t;
 
-
-typedef struct{
+typedef struct
+{
 	bool repeated;
 	bool init;
 	uint16_t record;
 } recordset1_t;
 
-typedef struct{
+typedef struct
+{
 	uint32_t current_length;
 	recordset1_t *recordsets;
 } recordset_t;
 
-typedef struct{
+typedef struct
+{
 	bool repeated;
 	bool init;
 	uint16_t uni_id;
 	uint64_t pos;
 } record_ps_t;
 
-typedef struct{
+typedef struct
+{
 	uint32_t current_length;
 	record_ps_t *records;
 } recordset_ps_t;
@@ -121,26 +138,40 @@ void yak_bf_destroy(yak_bf_t *b);
 int yak_bf_insert(yak_bf_t *b, uint64_t hash);
 
 yak_ch_t *yak_ch_init(int k, int pre, int n_hash, int n_shift);
+
 void yak_ch_destroy(yak_ch_t *h);
 void yak_ch_destroy_bf(yak_ch_t *h);
 int yak_ch_insert_list(yak_ch_t *h, int create_new, int n, const uint64_t *a);
-// int yak_ch_insert_list_kmer_full(yak_ch_t *h, yak_ch_t *h_pos,
-// 								 int create_new, int n,
-// 								 const uint64_t *a, const uint64_t *r,
-// 								 const uint32_t *pos, const bool *f,
-// 								 long i);
-int yak_ch_insert_list_kmer_full(yak_ch_t *h,
+int yak_ch_insert_list_kmer_record_mapping(yak_ch_t *h, int create_new, int n, const uint64_t *a, const bool *f, recordset_t *recordset, const uint16_t *r, long i, std::set<uint64_t> *deleted);
+int yak_ch_insert_list_kmer_record_mapping2(yak_ch_t *h, yak_ch_t *h_pos, int create_new, int n, const uint64_t *a, const bool *f, recordset_t *recordset, const uint16_t *r, const uint32_t *pos, long i, std::set<uint64_t> *deleted);
+int yak_ch_insert_list_kmer_pos(yak_ch_t *h, yak_ch_t *h_pos, int create_new, int n, const uint64_t *a, const uint16_t *r, const uint32_t *pos, long i);
+int yak_ch_get(const yak_ch_t *h, uint64_t x);
+int yak_ch_get_k(const yak_ch_t *h, uint64_t x);
+uint64_t yak_ch_get_pos(const yak_ch_t *h, const yak_ch_t *h_pos, uint64_t x, uint32_t *pos);
+int yak_ch_get_k_for_repeat(const yak_ch_t *h, uint64_t x);
+//...................
+uint16_t yak_ch_get_pos2(const yak_ch_t *h, const yak_ch_t *h_pos, uint64_t x, uint64_t x2, uint32_t *pos);
+uint64_t yak_ch_get_pos_for_repeat(const yak_ch_t *h, const yak_ch_t *h_pos, uint64_t x, uint32_t *pos);
+void yak_ch_get_pos_test(yak_ch_t *h, yak_ch_t *h_pos, uint64_t x, uint32_t *pos);
+uint16_t yak_ch_get_full_info(const yak_ch_t *h, const yak_ch_t *h_pos, uint64_t x,
+							  bool *is_forward, bool *is_repeat, uint32_t *position);
+int yak_ch_insert_list_kmer_full(yak_ch_t *h, yak_ch_t *h_pos,
 								 int create_new, int n,
 								 const uint64_t *a, const uint64_t *r,
 								 const uint32_t *pos, const bool *f,
 								 long i);
 
-int yak_ch_insert_list_kmer_record_mapping(yak_ch_t *h, int create_new, int n, const uint64_t *a, const bool *f, recordset_t* recordset, const uint16_t *r,  long i, std::set<uint64_t>* deleted);
-int yak_ch_insert_list_kmer_pos(yak_ch_t *h, yak_ch_t *h_pos, int create_new, int n, const uint64_t *a, const uint16_t *r, const uint32_t*pos, long i);
-int yak_ch_get(const yak_ch_t *h, uint64_t x);
-int yak_ch_get_k(const yak_ch_t *h, uint64_t x);
-uint16_t yak_ch_get_pos(const yak_ch_t *h, const yak_ch_t *h_pos, uint64_t x, uint32_t *pos);
-uint16_t yak_ch_get_pos_1(const yak_ch_t *h, uint64_t x, uint32_t *pos);
+int yak_ch_insert_list_kmer_full_for_polishing(yak_ch_t *h, yak_ch_t *h_pos,
+											   int create_new, int n, const uint64_t *a, const uint64_t *r,
+											   const uint32_t *pos, const bool *f,
+											   long i);
+											   
+int yak_ch_insert_list_kmer_full_for_polishing_target(yak_ch_t *h, yak_ch_t *h_pos,
+											   int create_new, int n, const uint64_t *a, const uint64_t *r,
+											   const uint32_t *pos, const bool *f,
+											   long i);											 
+											 
+											   
 void yak_ch_clear(yak_ch_t *h, int n_thread);
 void yak_ch_hist(const yak_ch_t *h, int64_t cnt[YAK_N_COUNTS], int n_thread);
 void yak_ch_shrink(yak_ch_t *h, int min, int max, int n_thread);
@@ -150,7 +181,7 @@ yak_ch_t *yak_ch_restore_core(yak_ch_t *ch0, const char *fn, int mode, ...);
 
 yak_ch_t *yak_count(const char *fn, const yak_copt_t *opt, yak_ch_t *h0);
 yak_ch_t *yak_count_create_new(const char *fn, const yak_copt_t *opt, yak_ch_t *h0);
-yak_ch_arr_t* yak_count_multi(const char *fn, const yak_copt_t *opt, yak_ch_arr_t *h0);
+yak_ch_arr_t *yak_count_multi(const char *fn, const yak_copt_t *opt, yak_ch_arr_t *h0);
 
 void yak_qopt_init(yak_qopt_t *opt);
 void yak_qv(const yak_qopt_t *opt, const char *fn, const yak_ch_t *ch, int64_t *cnt);

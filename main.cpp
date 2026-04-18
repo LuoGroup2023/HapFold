@@ -197,12 +197,12 @@ int main_resolve_haplotypes(int argc, char *argv[])
 
     if (argc - o.ind < 3)
     {
-        fprintf(stderr, "\nUsage: GraPhaser resolve_haplotypes [options] <hic_mapping.bam/sam> <assembly.gfa> <output_dir>\n\n");
+        fprintf(stderr, "\nUsage: HapFold resolve_haplotypes [options] <hic_mapping.out> <assembly.gfa> <output_dir> -1 *.hap1.p_ctg.gfa -2 *.hap2.p_ctg.gfa -u utg_ctg_file \n\n");
         fprintf(stderr, "Options:\n");
         fprintf(stderr, "  -t INT      Number of threads [%d]\n", g_params.n_threads);
         fprintf(stderr, "  -n INT      Expected number of chromosomes (e.g., 78 for chicken) [%d]\n", g_params.n_chrs);
         fprintf(stderr, "  -e STR      Restriction enzymes separated by comma (e.g., GATC,GANTC) [%s]\n", g_params.enzymes_unsplit.c_str());
-        fprintf(stderr, "  -c FILE     Path to contig_hap_nodes.txt (required for Hi-C phasing)\n");
+        fprintf(stderr, "  -c FILE     Path to contig_hap_nodes.txt (debug for Hi-C phasing)\n");
         fprintf(stderr, "  -u FILE     Path to utg_to_ctg relationship file [optional]\n");
         fprintf(stderr, "  -1 FILE     Path to haplotype 1 GFA file (*.hap1.p_ctg.gfa)\n");
         fprintf(stderr, "  -2 FILE     Path to haplotype 2 GFA file (*.hap2.p_ctg.gfa)\n");
@@ -400,7 +400,7 @@ int main(int argc, char *argv[])
 		ret = main_count(argc - 1, argv + 1);
 	else if (strcmp(argv[1], "version") == 0)
 	{
-		printf("gfa.h: %s\nps: %s\n", HapFold_VERSION, HapFold_VERSION);
+		printf("HapFold: %s\n", HapFold_VERSION);
 		return 0;
 	}
 	else
