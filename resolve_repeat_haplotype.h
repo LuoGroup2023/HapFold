@@ -6670,49 +6670,49 @@ void get_haplotype_path(uint32_t **connection_count_forward, uint32_t **connecti
 
     set<string> exclude_contigs;
 
-    if (check_identity)
-    {
-        bool to_delete = identityFile.size() == 0;
-        if (identityFile.size() == 0)
-        {
-            stringstream minimap2_cmd;
-            minimap2_cmd << "minimap2 -I40G -x asm20 -Y -a --eqx -t" << n_threads << " " << string(output_directory) + string("/pred_haplotypes.fa") << " " << string(output_directory) + string("/pred_haplotypes.fa");
-            minimap2_cmd << " > " << string(output_directory) << "/haplotype_identity.sam";
+    // if (check_identity)
+    // {
+    //     bool to_delete = identityFile.size() == 0;
+    //     if (identityFile.size() == 0)
+    //     {
+    //         stringstream minimap2_cmd;
+    //         minimap2_cmd << "minimap2 -I40G -x asm20 -Y -a --eqx -t" << n_threads << " " << string(output_directory) + string("/pred_haplotypes.fa") << " " << string(output_directory) + string("/pred_haplotypes.fa");
+    //         minimap2_cmd << " > " << string(output_directory) << "/haplotype_identity.sam";
 
-            system(minimap2_cmd.str().c_str());
-            identityFile = string(output_directory) + string("/haplotype_identity.sam");
-        }
-        ifstream infile(identityFile.c_str());
-        string fileLine;
-        string contigName1;
-        int flag;
-        string contigName2;
-        getline(infile, fileLine);
-        while (getline(infile, fileLine))
-        {
-            istringstream iss(fileLine);
-            iss >> contigName1 >> flag >> contigName2;
-            if (flag != 4 && contigName2 != contigName1)
-            {
-                contigName1 = contigName1.substr(0, contigName1.size() - 5);
-                contigName2 = contigName2.substr(0, contigName2.size() - 5);
-                exclude_contigs.insert(contigName1);
-                exclude_contigs.insert(contigName2);
-            }
-        }
+    //         system(minimap2_cmd.str().c_str());
+    //         identityFile = string(output_directory) + string("/haplotype_identity.sam");
+    //     }
+    //     ifstream infile(identityFile.c_str());
+    //     string fileLine;
+    //     string contigName1;
+    //     int flag;
+    //     string contigName2;
+    //     getline(infile, fileLine);
+    //     while (getline(infile, fileLine))
+    //     {
+    //         istringstream iss(fileLine);
+    //         iss >> contigName1 >> flag >> contigName2;
+    //         if (flag != 4 && contigName2 != contigName1)
+    //         {
+    //             contigName1 = contigName1.substr(0, contigName1.size() - 5);
+    //             contigName2 = contigName2.substr(0, contigName2.size() - 5);
+    //             exclude_contigs.insert(contigName1);
+    //             exclude_contigs.insert(contigName2);
+    //         }
+    //     }
 
-        if (to_delete)
-        {
-            stringstream rm_cmd;
-            rm_cmd << "rm " << identityFile;
-            system(rm_cmd.str().c_str());
-        }
+    //     if (to_delete)
+    //     {
+    //         stringstream rm_cmd;
+    //         rm_cmd << "rm " << identityFile;
+    //         system(rm_cmd.str().c_str());
+    //     }
 
-        for (auto i : exclude_contigs)
-        {
-            // cout << i << endl;
-        }
-    }
+    //     for (auto i : exclude_contigs)
+    //     {
+    //         // cout << i << endl;
+    //     }
+    // }
     for (int i = 0; i < len * 4; ++i)
     {
         best_buddy[i] = (float *)calloc(len * 4, sizeof(float));
@@ -18578,172 +18578,6 @@ void get_haplotype_path_test_code(uint32_t **connection_count_forward, uint32_t 
 
         int temp_count = current_count;
 
-        // // 循环直到数量降至目标阈值
-        // while (temp_count > target_limit)
-        // {
-        //     uint32_t min_len = 0xFFFFFFFF;
-        //     int shortest_chain_idx = -1;
-
-        //     // 1. 寻找当前未合并 且 未尝试失败 的最短 contig
-        //     for (int i = 0; i < contig_chain.size(); ++i)
-        //     {
-        //         // 既没被合并，也没被标记为“放弃治疗”
-        //         if (merged_indices.find(i) == merged_indices.end() &&
-        //             tried_indices.find(i) == tried_indices.end())
-        //         {
-        //             if (contig_chain[i].path_length < min_len && contig_chain[i].path_length > 0)
-        //             {
-        //                 min_len = contig_chain[i].path_length;
-        //                 shortest_chain_idx = i;
-        //             }
-        //         }
-        //     }
-
-        //     if (shortest_chain_idx == -1)
-        //     {
-        //         outFileFiltered << "所有剩余节点均已尝试合并但失败，提前结束循环。\n";
-        //         break; // 所有能试的都试过了
-        //     }
-
-        //     // =========================================================================================
-        //     // 2. 全局搜寻：寻找短序列 (My) 的最高强度连接伙伴，并确定绝对物理排列顺序
-        //     // =========================================================================================
-        //     uint32_t max_strength = 0;
-        //     int best_left_row_idx = -1;  // 记录最终排在左侧的矩阵行索引
-        //     int best_right_row_idx = -1; // 记录最终排在右侧的矩阵行索引
-        //     bool my_is_left = true;      // 标记发起搜寻的短序列最终是排在左边还是右边
-
-        //     // 遍历短序列的两个端口 (正向 0 和反向 1)
-        //     for (int my_side = 0; my_side < 2; ++my_side)
-        //     {
-        //         int my_row = shortest_chain_idx * 2 + my_side;
-
-        //         // 遍历全局所有其他 contig 的端口
-        //         for (int other_row = 0; other_row < num_contigs_with_direction; ++other_row)
-        //         {
-        //             int other_chain_idx = other_row / 2;
-
-        //             // 排除自己以及已经被吸收合并的 contig
-        //             if (other_chain_idx == shortest_chain_idx)
-        //                 continue;
-        //             if (merged_indices.find(other_chain_idx) != merged_indices.end())
-        //                 continue;
-
-        //             // 检查是否为同源染色体（防止错误组装）
-        //             uint32_t my_index = contig_chain[other_chain_idx].other_index;
-        //             uint32_t shortest_index = contig_chain[shortest_chain_idx].index;
-        //             if (my_index == shortest_index)
-        //                 continue;
-
-        //             // 【方向探测 A】: 假设短序列在左，伙伴在右 (My ---> Partner)
-        //             if (connect_num11[my_row][other_row] > max_strength)
-        //             {
-        //                 max_strength = connect_num11[my_row][other_row];
-        //                 best_left_row_idx = my_row;
-        //                 best_right_row_idx = other_row;
-        //                 my_is_left = true; // 短序列在左
-        //             }
-
-        //             // 【方向探测 B】: 假设伙伴在左，短序列在右 (Partner ---> My)
-        //             // 注意：这里矩阵的行代表左，列代表右
-        //             if (connect_num11[other_row][my_row] > max_strength)
-        //             {
-        //                 max_strength = connect_num11[other_row][my_row];
-        //                 best_left_row_idx = other_row;
-        //                 best_right_row_idx = my_row;
-        //                 my_is_left = false; // 短序列在右
-        //             }
-        //         }
-        //     }
-
-        //     // =========================================================================================
-        //     // 3. 执行物理拼接：完全按照 Max 信号确定的绝对位置和绝对正反状态进行无脑拼接
-        //     // =========================================================================================
-        //     if (best_left_row_idx != -1 && max_strength > dynamic_threshold)
-        //     {
-        //         int left_chain_idx = best_left_row_idx / 2;
-        //         int right_chain_idx = best_right_row_idx / 2;
-
-        //         // 确定谁是吸收方 (Partner)：短序列将被注销，所有数据并入吸收方
-        //         int partner_chain_idx = my_is_left ? right_chain_idx : left_chain_idx;
-
-        //         string left_name = contig_names[best_left_row_idx];
-        //         string right_name = contig_names[best_right_row_idx];
-
-        //         // [日志记录 1]：打印拼接指令和物理顺序
-        //         outFileFiltered << "--------------------------------------------------\n"
-        //                         << "合并指令: [" << left_name << " (len:" << contig_chain[left_chain_idx].path_length << ")] "
-        //                         << "---> [" << right_name << " (len:" << contig_chain[right_chain_idx].path_length << ")] "
-        //                         << "强度: " << max_strength << "\n";
-
-        //         // 【步骤 1】提取并处理排在【左侧】的序列及其记录表
-        //         string left_seq = *(contig_chain[left_chain_idx].haplo_sequences);
-        //         auto left_info = contig_chain[left_chain_idx].contig_info_output;
-
-        //         // 判断左侧序列是否需要反转 (奇数行代表 '-', 即要求反向互补)
-        //         bool left_is_rev = (best_left_row_idx % 2 == 1);
-        //         if (left_is_rev)
-        //         {
-        //             outFileFiltered << "  [处理左侧]: 检测到 '-' 信号，对 " << left_name << " 进行整体反向互补并重置内部记录。\n";
-        //             left_seq = complement(left_seq);                  // 底层 ATCG 反转互补
-        //             std::reverse(left_info.begin(), left_info.end()); // 倒序内部 contig 排列
-        //             for (auto &info : left_info)
-        //             {
-        //                 info.second = !info.second; // 内部每个 htig 的正负标记取反
-        //             }
-        //         }
-
-        //         // 【步骤 2】提取并处理排在【右侧】的序列及其记录表
-        //         string right_seq = *(contig_chain[right_chain_idx].haplo_sequences);
-        //         auto right_info = contig_chain[right_chain_idx].contig_info_output;
-
-        //         // 判断右侧序列是否需要反转
-        //         bool right_is_rev = (best_right_row_idx % 2 == 1);
-        //         if (right_is_rev)
-        //         {
-        //             outFileFiltered << "  [处理右侧]: 检测到 '-' 信号，对 " << right_name << " 进行整体反向互补并重置内部记录。\n";
-        //             right_seq = complement(right_seq);
-        //             std::reverse(right_info.begin(), right_info.end());
-        //             for (auto &info : right_info)
-        //             {
-        //                 info.second = !info.second;
-        //             }
-        //         }
-
-        //         // 【步骤 3】大道至简的拼接：此时左右两边的方向已绝对正确，直接线性串接即可
-        //         string gap(100, 'N');
-        //         string final_seq = left_seq + gap + right_seq;
-
-        //         // 合并内部 HTG 组成记录表 (左边的记录 + 右边的记录)
-        //         auto final_info = left_info;
-        //         final_info.insert(final_info.end(), right_info.begin(), right_info.end());
-
-        //         // 【步骤 4】数据写回：将合并后的终极序列和记录表，安全转移到吸收方(长序列)体内
-        //         *(contig_chain[partner_chain_idx].haplo_sequences) = final_seq;
-        //         contig_chain[partner_chain_idx].contig_info_output = final_info;
-        //         contig_chain[partner_chain_idx].path_length = final_seq.length();
-
-        //         // [日志记录 2]：打印合并后的最终全貌，便于人工校验
-        //         outFileFiltered << "  └─ 真实物理序列生成: " << left_name << (left_is_rev ? "(已反转)" : "(正向)")
-        //                         << " ---> gap(100N) ---> " << right_name << (right_is_rev ? "(已反转)" : "(正向)") << "\n";
-        //         outFileFiltered << "  └─ 数据吸收方: contig_chain[" << partner_chain_idx << "]\n";
-
-        //         // 【收尾】：短序列完成使命，物理消失，减少总序列数
-        //         merged_indices.insert(shortest_chain_idx);
-        //         temp_count -= 2;
-        //     }
-        //     else
-        //     {
-        //         outFileFiltered << "警告: 最短 Contig " << contig_names[shortest_chain_idx * 2] << " 无有效连接，强制标记为独立。\n";
-        //         // 标记为已尝试，但 NOT merged
-        //         tried_indices.insert(shortest_chain_idx);
-        //         // 但不减 temp_count，因为它依然是一个独立的 scaffold
-        //         // merged_indices.insert(shortest_chain_idx);
-        //         target_limit += 2;
-        //         outFileFiltered << "      -> 目标阈值放宽至: " << target_limit << " (当前剩余: " << temp_count << ")\n";
-        //     }
-        // }
-
 
         //TODO: debug for pig 
 
@@ -23705,59 +23539,59 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
     exit(0);
     set<string> exclude_contigs;
     cerr << "Start minimap2 step ..." << endl;
-    if (check_identity)
-    {
-        bool to_delete = identityFile.size() == 0;
-        if (identityFile.size() == 0)
-        {
-            stringstream minimap2_cmd;
-            minimap2_cmd << "minimap2 -I40G -x asm20 -Y -a --eqx -t" << n_threads << " " << string(output_directory) + string("/pre_haplotypes.fa") << " " << string(output_directory) + string("/pre_haplotypes.fa");
-            minimap2_cmd << " > " << string(output_directory) << "/haplotype_identity.sam";
+    // if (check_identity)
+    // {
+    //     bool to_delete = identityFile.size() == 0;
+    //     if (identityFile.size() == 0)
+    //     {
+    //         stringstream minimap2_cmd;
+    //         minimap2_cmd << "minimap2 -I40G -x asm20 -Y -a --eqx -t" << n_threads << " " << string(output_directory) + string("/pre_haplotypes.fa") << " " << string(output_directory) + string("/pre_haplotypes.fa");
+    //         minimap2_cmd << " > " << string(output_directory) << "/haplotype_identity.sam";
 
-            system(minimap2_cmd.str().c_str());
-            identityFile = string(output_directory) + string("/haplotype_identity.sam");
-        }
-        ifstream infile(identityFile.c_str());
-        string fileLine;
-        string contigName1;
-        int flag;
-        string contigName2;
-        // string fileLine;
-        while (getline(infile, fileLine))
-        {
-            if (fileLine[0] == '@')
-                continue; // 跳过 SAM header 行
+    //         system(minimap2_cmd.str().c_str());
+    //         identityFile = string(output_directory) + string("/haplotype_identity.sam");
+    //     }
+    //     ifstream infile(identityFile.c_str());
+    //     string fileLine;
+    //     string contigName1;
+    //     int flag;
+    //     string contigName2;
+    //     // string fileLine;
+    //     while (getline(infile, fileLine))
+    //     {
+    //         if (fileLine[0] == '@')
+    //             continue; // 跳过 SAM header 行
 
-            istringstream iss(fileLine);
-            iss >> contigName1 >> flag >> contigName2;
+    //         istringstream iss(fileLine);
+    //         iss >> contigName1 >> flag >> contigName2;
 
-            if (iss.fail())
-            {
-                cerr << "SAM parse error line: " << fileLine << endl;
-                continue;
-            }
+    //         if (iss.fail())
+    //         {
+    //             cerr << "SAM parse error line: " << fileLine << endl;
+    //             continue;
+    //         }
 
-            if (flag != 4 && contigName2 != contigName1)
-            {
-                contigName1 = contigName1.substr(0, contigName1.size() - 5);
-                contigName2 = contigName2.substr(0, contigName2.size() - 5);
-                exclude_contigs.insert(contigName1);
-                exclude_contigs.insert(contigName2);
-            }
-        }
+    //         if (flag != 4 && contigName2 != contigName1)
+    //         {
+    //             contigName1 = contigName1.substr(0, contigName1.size() - 5);
+    //             contigName2 = contigName2.substr(0, contigName2.size() - 5);
+    //             exclude_contigs.insert(contigName1);
+    //             exclude_contigs.insert(contigName2);
+    //         }
+    //     }
 
-        if (to_delete)
-        {
-            stringstream rm_cmd;
-            rm_cmd << "rm " << identityFile;
-            system(rm_cmd.str().c_str());
-        }
+    //     if (to_delete)
+    //     {
+    //         stringstream rm_cmd;
+    //         rm_cmd << "rm " << identityFile;
+    //         system(rm_cmd.str().c_str());
+    //     }
 
-        for (auto i : exclude_contigs)
-        {
-            // cout << i << endl;
-        }
-    }
+    //     for (auto i : exclude_contigs)
+    //     {
+    //         // cout << i << endl;
+    //     }
+    // }
     for (int i = 0; i < len * 4; ++i)
     {
         best_buddy[i] = (float *)calloc(len * 4, sizeof(float));
@@ -25506,49 +25340,49 @@ void get_haplotype_path_10_29(uint32_t **connection_count_forward, uint32_t **co
 
     set<string> exclude_contigs;
 
-    if (check_identity)
-    {
-        bool to_delete = identityFile.size() == 0;
-        if (identityFile.size() == 0)
-        {
-            stringstream minimap2_cmd;
-            minimap2_cmd << "minimap2 -I40G -x asm20 -Y -a --eqx -t" << n_threads << " " << string(output_directory) + string("/pred_haplotypes.fa") << " " << string(output_directory) + string("/pred_haplotypes.fa");
-            minimap2_cmd << " > " << string(output_directory) << "/haplotype_identity.sam";
+    // if (check_identity)
+    // {
+    //     bool to_delete = identityFile.size() == 0;
+    //     if (identityFile.size() == 0)
+    //     {
+    //         stringstream minimap2_cmd;
+    //         minimap2_cmd << "minimap2 -I40G -x asm20 -Y -a --eqx -t" << n_threads << " " << string(output_directory) + string("/pred_haplotypes.fa") << " " << string(output_directory) + string("/pred_haplotypes.fa");
+    //         minimap2_cmd << " > " << string(output_directory) << "/haplotype_identity.sam";
 
-            system(minimap2_cmd.str().c_str());
-            identityFile = string(output_directory) + string("/haplotype_identity.sam");
-        }
-        ifstream infile(identityFile.c_str());
-        string fileLine;
-        string contigName1;
-        int flag;
-        string contigName2;
-        getline(infile, fileLine);
-        while (getline(infile, fileLine))
-        {
-            istringstream iss(fileLine);
-            iss >> contigName1 >> flag >> contigName2;
-            if (flag != 4 && contigName2 != contigName1)
-            {
-                contigName1 = contigName1.substr(0, contigName1.size() - 5);
-                contigName2 = contigName2.substr(0, contigName2.size() - 5);
-                exclude_contigs.insert(contigName1);
-                exclude_contigs.insert(contigName2);
-            }
-        }
+    //         system(minimap2_cmd.str().c_str());
+    //         identityFile = string(output_directory) + string("/haplotype_identity.sam");
+    //     }
+    //     ifstream infile(identityFile.c_str());
+    //     string fileLine;
+    //     string contigName1;
+    //     int flag;
+    //     string contigName2;
+    //     getline(infile, fileLine);
+    //     while (getline(infile, fileLine))
+    //     {
+    //         istringstream iss(fileLine);
+    //         iss >> contigName1 >> flag >> contigName2;
+    //         if (flag != 4 && contigName2 != contigName1)
+    //         {
+    //             contigName1 = contigName1.substr(0, contigName1.size() - 5);
+    //             contigName2 = contigName2.substr(0, contigName2.size() - 5);
+    //             exclude_contigs.insert(contigName1);
+    //             exclude_contigs.insert(contigName2);
+    //         }
+    //     }
 
-        if (to_delete)
-        {
-            stringstream rm_cmd;
-            rm_cmd << "rm " << identityFile;
-            system(rm_cmd.str().c_str());
-        }
+    //     if (to_delete)
+    //     {
+    //         stringstream rm_cmd;
+    //         rm_cmd << "rm " << identityFile;
+    //         system(rm_cmd.str().c_str());
+    //     }
 
-        for (auto i : exclude_contigs)
-        {
-            cout << i << endl;
-        }
-    }
+    //     for (auto i : exclude_contigs)
+    //     {
+    //         cout << i << endl;
+    //     }
+    // }
     // for (int i = 0; i < len * 4; ++i)
     // {
     //     best_buddy[i] = (float *)calloc(len * 4, sizeof(float));

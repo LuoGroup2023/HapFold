@@ -5,7 +5,7 @@ OBJS=		kthread.o bbf.o htab.o bseq.o misc.o sys.o \
 		    kalloc.o paf.o hic_mapping.o  hic_completeness.o hic_qv.o count.o hic_switch_error.o
 PROG=		HapFold
 LIBS=		-lm -lz -lpthread ./libminimap2.a ./libz.a
-
+# 
 ifneq ($(asan),)
 	CFLAGS+=-fsanitize=address
 	LIBS+=-fsanitize=address
