@@ -1,38 +1,63 @@
 # HapFold: Efficient and Accurate Chromosome-Scale Haplotype Reconstruction
 
-**HapFold** is a powerful scaffolding framework designed for the highly accurate, chromosome-scale haplotype reconstruction of diploid genomes. 
+[![BioConda Downloads](https://img.shields.io/conda/dn/bioconda/hapfold?label=bioconda%20downloads)](https://anaconda.org/bioconda/hapfold)
+[![BioConda Version](https://img.shields.io/conda/vn/bioconda/hapfold?label=bioconda)](https://anaconda.org/bioconda/hapfold)
+[![License](https://img.shields.io/github/license/LuoGroup2023/HapFold)](https://github.com/LuoGroup2023/HapFold/blob/main/LICENSE)
+[![Release](https://img.shields.io/github/v/release/LuoGroup2023/HapFold?sort=semver)](https://github.com/LuoGroup2023/HapFold/releases)
+[![Downloads](https://img.shields.io/github/downloads/LuoGroup2023/HapFold/total)](https://github.com/LuoGroup2023/HapFold/releases)
+[![Stars](https://img.shields.io/github/stars/LuoGroup2023/HapFold?style=social)](https://github.com/LuoGroup2023/HapFold/stargazers)
+
+## Description
+
+**HapFold** is a scaffolding framework designed for the highly accurate, chromosome-scale haplotype reconstruction of diploid genomes. 
 
 By uniquely integrating the synergistic features of both **graph-based** and **sequence-based** paradigms, HapFold achieves significantly lower misassignment rates and higher computational efficiency than existing methods. Furthermore, when applied to diploid genomes sequenced with standard ONT simplex reads, HapFold enables the robust and scalable reconstruction of a greater number of **near-T2T (telomere-to-telomere)** assemblies.
+
+## Installation and Dependencies
+
+### Prerequisites
+* `g++` (supporting C++9.4 or later)
+* `zlib`
+
+### 1. Install via Bioconda (Recommended)
+HapFold is officially available on Bioconda. This is the fastest and easiest way to install the tool:
+
+```bash
+# Create and activate a new environment
+conda create -n hapfold
+conda activate hapfold
+
+# Install HapFold
+conda install -c bioconda hapfold
+
+# Alternatively, you can use mamba for faster dependency resolution:
+# mamba install -c bioconda hapfold
+```
+
+### 2. Install from Source Code
+If you prefer to compile from source:
+
+```bash
+git clone https://github.com/LuoGroup2023/HapFold.git
+cd HapFold
+
+# Create environment with dependencies
+conda create -n hapfold
+conda activate hapfold
+
+# Compile the source code
+make
+```
+
+## 🚀 Quick Start & Workflow
+
+HapFold utilizes a two-step workflow: Mapping and Resolving. 
 
 ### 🎯 Primary Application
 HapFold is primarily designed for **diploid genome scaffolding** using Hi-C data. It seamlessly integrates with `hifiasm` outputs and requires three primary GFA files from the initial assembly:
 1. Unphased unitig graph (`*.p_utg.gfa`)
 2. Haplotype 1 contig graph (`*.hap1.p_ctg.gfa`)
 3. Haplotype 2 contig graph (`*.hap2.p_ctg.gfa`)
-
----
-
-## 🛠 Installation
-
-HapFold is extremely lightweight and easy to install.
-
-**Prerequisites:**
-* `g++` (supporting C++11 or later)
-* `zlib`
-
-**Build from source:**
-```bash
-git clone [https://github.com/LuoGroup2023/HapFold.git](https://github.com/LuoGroup2023/HapFold.git)
-cd HapFold
-make
-```
-After compilation, the `HapFold` executable binary will be available in the root directory.
-
----
-
-## 🚀 Quick Start & Workflow
-
-HapFold utilizes a two-step workflow: Mapping and Resolving. 
 
 ### General Usage
 ```text

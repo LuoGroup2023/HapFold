@@ -1376,10 +1376,10 @@ void build_bubbles(asg_t *g,
         {
             if (!out_src[i].del)
             {
-                cout << g->seq[out_src[i].v >> 1].name << " ";
+                // cout << g->seq[out_src[i].v >> 1].name << " ";
             }
         }
-        cout << endl;
+        // cout << endl;
 
         // cout << "[Before cut] Outgoing from " << g->seq[tgt >> 1].name << ": ";
         asg_arc_t *out_tgt = asg_arc_a(g, tgt ^ 1);
@@ -1486,7 +1486,7 @@ void build_bubbles(asg_t *g,
                     uint32_t nid = node_stack[ui];
                     node_type[nid] = 2;
                 }
-                cout << "Bubble path too long, break" << std::endl;
+                // cout << "Bubble path too long, break" << std::endl;
                 node_type[bubble->begNode] = 1;
                 node_type[bubble->endNode] = 1;
                 break;
@@ -1552,7 +1552,7 @@ void Get_bubble(asg_t *g,
             }
         }
     }
-    cout << "type3_count: " << type3_count << endl;
+    // cout << "type3_count: " << type3_count << endl;
 }
 
 vector<set<uint32_t>> find_connected_components_debug_plants(asg_t *g,
@@ -1617,7 +1617,7 @@ vector<set<uint32_t>> find_connected_components_debug_plants(asg_t *g,
         hap_chains.push_back(component);
     }
 
-    cout << endl;
+    
     for (size_t i = 0; i < hap_chains.size(); ++i)
     {
         std::cout << "Haplotypic chain " << i << " contains nodes: ";
@@ -1757,7 +1757,7 @@ vector<set<uint32_t>> find_connected_components_debug(asg_t *g,
         avg_degree = (double)avg_degree_out / total;
         double ratio = (double)type1_2_count / total; 
         double ratio2 = (double)type4_count / total;
-        cout << "node: " << g->seq[*comp.begin() >> 1].name << " avg_degree: " << avg_degree << " type1_2_count : " << type1_2_count << " ratio " << ratio << " type4_count: " << type4_count << " ratio2: " << ratio2 << endl;
+        //cout << "node: " << g->seq[*comp.begin() >> 1].name << " avg_degree: " << avg_degree << " type1_2_count : " << type1_2_count << " ratio " << ratio << " type4_count: " << type4_count << " ratio2: " << ratio2 << endl;
         // cout << "node: " << g->seq[*comp.begin() >> 1].name << " begin_end : " << begin_end << endl;
         if (ratio2 > 0.13)
         {
@@ -1793,7 +1793,7 @@ vector<set<uint32_t>> find_connected_components_debug(asg_t *g,
     }
 
     components = std::move(filtered_components);
-    cout << endl;
+    // cout << endl;
 
     for (size_t i = 0; i < hap_chains.size(); ++i)
     {
@@ -2581,7 +2581,7 @@ void build_bubbles2(asg_t *g,
         }
     }
 
-    cout << "node_type[i] = 3: " << endl;
+    // cout << "node_type[i] = 3: " << endl;
     for (uint32_t i = 0; i < g->n_seq * 2; i++)
     {
         if (node_type[i] != 2)
@@ -2593,7 +2593,7 @@ void build_bubbles2(asg_t *g,
             {
                 node_type[i] = 3;
                 node_type[i ^ 1] = 3;
-                cout << g->seq[i >> 1].name << " ";
+                //cout << g->seq[i >> 1].name << " ";
 
                 // cout << node_type[i] << " ";
             }
@@ -2681,7 +2681,7 @@ void build_bubbles2(asg_t *g,
                     uint32_t nid = node_stack[ui];
                     node_type[nid] = 2;
                 }
-                cout << "Bubble path too long, break" << std::endl;
+                //cout << "Bubble path too long, break" << std::endl;
                 node_type[bubble->begNode] = 1;
                 node_type[bubble->endNode] = 1;
                 break;
@@ -4283,10 +4283,10 @@ void find_all_paths_in_hap_chains(asg_t *g, const vector<set<uint32_t>> &hap_cha
         {
             if (!used.count(node) && !used.count(node ^ 1))
             {
-                cout << "[Unvisited Warning] Leftover node in chain " << chain_idx << ": "
-                     << g->seq[node >> 1].name << (node & 1 ? "-" : "+")
-                     << " (ID: " << node << ")"
-                     << " | node_type: " << node_type[node] << endl;
+                // cout << "[Unvisited Warning] Leftover node in chain " << chain_idx << ": "
+                //      << g->seq[node >> 1].name << (node & 1 ? "-" : "+")
+                //      << " (ID: " << node << ")"
+                //      << " | node_type: " << node_type[node] << endl;
                 unvisited_nodes.push_back(node);
             }
         }
