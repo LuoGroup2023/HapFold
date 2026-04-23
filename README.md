@@ -41,12 +41,8 @@ If you prefer to compile from source:
 git clone https://github.com/LuoGroup2023/HapFold.git
 cd HapFold
 
-# Create environment with dependencies
-conda create -n hapfold
-conda activate hapfold
-
 # Compile the source code
-make
+make -j8
 ```
 
 ## 🚀 Quick Start & Workflow

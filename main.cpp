@@ -39,23 +39,7 @@ void destory_opt(ps_opt_t *asm_opt)
 }
 
 
-struct GlobalParams {
-    int n_threads = 8;
-    string enzymes_unsplit;
-    string identityFile;
-    bool check_identity = false;
-    bool is_plant = false;
-    string contig_hap_file;
-    string utg_ctg_file;
-    string hap1_gfa;
-    string hap2_gfa;
-    int n_chrs = 0; 
-    double hic_scaffold_threshold_ratio = 0.6; 
-    
-    
-    bool debug_mode = false; 
 
-};
 
 static ko_longopt_t long_options[] = {
 	{"version", ko_no_argument, 300},
@@ -157,16 +141,17 @@ int main_resolve_haplotypes(int argc, char *argv[])
     ketopt_t o = KETOPT_INIT;
     int c;
 
-	GlobalParams g_params;
+    GlobalParams g_params;
 
-    // 2. 增加 debug 的长参数选项 (代号 302)
+    // 1. 增加控制 12M 和 300K 的长参数选项 (代号 303, 304)
     static ko_longopt_t longopts[] = {
         {"hic_scaffold_threshold_ratio", ko_required_argument, 301},
-        {"debug", ko_no_argument, 302}, // 新增：--debug 选项，无须传值
-        {0, 0, 0} // 必须以全0结尾
+        {"debug", ko_no_argument, 302}, 
+        {"chain_len_thresh", ko_required_argument, 303},     // 对应 > 12M 参与迭代的阈值
+        {"scaffold_len_thresh", ko_required_argument, 304},  // 对应 > 300K 直接输出的阈值
+        {0, 0, 0} 
     };
 
-    // 3. ketopt 的短参数字符串中加入 'd'，表示支持 -d
     while ((c = ketopt(&o, argc, argv, 1, "t:e:i:f:1:2:u:c:n:pd", longopts)) >= 0)
     {
         if (c == 't')
@@ -189,15 +174,19 @@ int main_resolve_haplotypes(int argc, char *argv[])
             g_params.n_chrs = atoi(o.arg);
         else if (c == 'p') 
             g_params.is_plant = true;
-        else if (c == 'd' || c == 302) // 4. 捕获 -d 或 --debug
+        else if (c == 'd' || c == 302) 
             g_params.debug_mode = true;
         else if (c == 301) 
             g_params.hic_scaffold_threshold_ratio = atof(o.arg);
+        else if (c == 303) // 捕获 12M 阈值
+            g_params.chain_len_threshold = atoi(o.arg);
+        else if (c == 304) // 捕获 300K 阈值
+            g_params.scaffold_len_threshold = atoi(o.arg);
     }
 
     if (argc - o.ind < 3)
     {
-        fprintf(stderr, "\nUsage: HapFold resolve_haplotypes [options] <hic_mapping.out> <assembly.gfa> <output_dir> -1 *.hap1.p_ctg.gfa -2 *.hap2.p_ctg.gfa -u utg_ctg_file \n\n");
+        fprintf(stderr, "\nUsage: GraPhaser resolve_haplotypes [options] <hic_mapping.out> <assembly.gfa> <output_dir> -1 *.hap1.p_ctg.gfa -2 *.hap2.p_ctg.gfa -u utg_ctg_file \n\n");
         fprintf(stderr, "Options:\n");
         fprintf(stderr, "  -t INT      Number of threads [%d]\n", g_params.n_threads);
         fprintf(stderr, "  -n INT      Expected number of chromosomes (e.g., 78 for chicken) [%d]\n", g_params.n_chrs);
@@ -209,24 +198,26 @@ int main_resolve_haplotypes(int argc, char *argv[])
         fprintf(stderr, "  -i BOOL     Enable identity check on contigs (true/false) [%s]\n", (g_params.check_identity ? "true" : "false"));
         fprintf(stderr, "  -f FILE     Precomputed identity file path; if omitted, check will run automatically [%s]\n", g_params.identityFile.c_str());
         fprintf(stderr, "  -p          Enable plant mode (uses alternative phasing algorithms) [optional]\n"); 
-        fprintf(stderr, "  -d, --debug Enable debug mode to run test code functions [optional]\n"); // 
+        fprintf(stderr, "  -d, --debug Enable debug mode to run test code functions [optional]\n"); 
         fprintf(stderr, "  --hic_scaffold_threshold_ratio FLOAT  Threshold ratio for Hi-C scaffolding [%.2f]\n", g_params.hic_scaffold_threshold_ratio);
+        fprintf(stderr, "  --chain_len_thresh INT                Length threshold to join contig_chain for iterative merging [%d]\n", g_params.chain_len_threshold);
+        fprintf(stderr, "  --scaffold_len_thresh INT             Length threshold to directly output to scaffold.fa [%d]\n", g_params.scaffold_len_threshold);
         fprintf(stderr, "\n");
         return 1;
     }
 
-    vector<string> enzymes;
-    if (g_params.enzymes_unsplit.size() > 1)
-    {
-        stringstream s_stream(g_params.enzymes_unsplit);
-        while (s_stream.good())
-        {
-            string substr;
-            getline(s_stream, substr, ',');
-            substr.erase(remove(substr.begin(), substr.end(), '^'), substr.end());
-            enzymes.push_back(substr);
-        }
-    }
+    // vector<string> enzymes;
+    // if (g_params.enzymes_unsplit.size() > 1)
+    // {
+    //     stringstream s_stream(g_params.enzymes_unsplit);
+    //     while (s_stream.good())
+    //     {
+    //         string substr;
+    //         getline(s_stream, substr, ',');
+    //         substr.erase(remove(substr.begin(), substr.end(), '^'), substr.end());
+    //         enzymes.push_back(substr);
+    //     }
+    // }
     std::vector<NamedBubbleContig> named_bubble_contigs;
 
     if (!g_params.contig_hap_file.empty())
@@ -241,7 +232,6 @@ int main_resolve_haplotypes(int argc, char *argv[])
     printf("start main\n");
     asg_t *graph = gfa_read(gfa_filename);
     map<uint32_t, map<uint32_t, set<uint32_t>>> *bubble_chain_graph = nullptr;
-    
     
     uint32_t **connections_foward;
     CALLOC(connections_foward, graph->n_seq);
@@ -279,17 +269,15 @@ int main_resolve_haplotypes(int argc, char *argv[])
         printf("[INFO] Default mode enabled. Using standard phasing functions.\n");
         bubble_chain_graph = phasing_10_7(graph, string(output_directory), connections_foward, connections_backward);
 
-        // 5. 根据 g_params.debug_mode 判断执行哪个分支
+        // 2. 将之前散落的各种参数整合进 g_params 统一传递
         if (g_params.debug_mode) {
             printf("[INFO] Debug mode enabled. Executing get_haplotype_path_test_code...\n");
             get_haplotype_path_test_code(connections_foward, connections_backward, graph, bubble_chain_graph,
-                                         output_directory, g_params.n_threads, enzymes, g_params.identityFile, g_params.check_identity,
-                                         g_params.utg_ctg_file, g_params.hap1_gfa, g_params.hap2_gfa, named_bubble_contigs, g_params.n_chrs, gfa_filename, g_params.hic_scaffold_threshold_ratio);
+                                         output_directory, named_bubble_contigs, gfa_filename, g_params);
         } else {
-            printf("[INFO] Executing standard model get_haplotype_path_12_10...\n");
-            get_haplotype_path_12_10(connections_foward, connections_backward, graph, bubble_chain_graph,
-                                     output_directory, g_params.n_threads, enzymes, g_params.identityFile, g_params.check_identity,
-                                     g_params.utg_ctg_file, g_params.hap1_gfa, g_params.hap2_gfa, named_bubble_contigs, g_params.n_chrs, gfa_filename, g_params.hic_scaffold_threshold_ratio);
+            printf("[INFO] Executing standard model get_haplotype_path_now...\n");
+            get_haplotype_path_now(connections_foward, connections_backward, graph, bubble_chain_graph,
+                                   output_directory, named_bubble_contigs, gfa_filename, g_params);
         }
     }
     return 0;
