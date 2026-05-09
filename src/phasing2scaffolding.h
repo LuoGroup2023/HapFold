@@ -6,7 +6,7 @@
 #include <string.h>
 #include "paf.h"
 #include <map>
-#include "bubble_chain.h"
+#include "graph_refining.h"
 #include <queue>
 #include <tuple>
 #include <assert.h>

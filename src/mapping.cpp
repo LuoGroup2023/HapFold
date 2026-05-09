@@ -3607,128 +3607,104 @@ int main_polishing_test(int argc, char *argv[])
 
 int main_poreC_map_test(int argc, char *argv[])
 {
-	pldat_t *h;		  // 存储Hi-C数据的处理状态及信息
-	int c;			  // 处理命令行参数
-	char *fn_out = 0; // 输出文件名
-	// char *gfa_filename = NULL; // GFA 文件名
+    pldat_t *h;
+    int c;
+    char *fn_out = 0;
+    char *hic_fn1_name = 0;
+    char *hic_fn2_name = 0;
 
-	yak_copt_t opt; // 存储命令行选项和参数的信息
-	ketopt_t o = KETOPT_INIT;
-	yak_copt_init(&opt);
-	opt.pre = YAK_COUNTER_BITS;
-	opt.n_thread = 32;
-	char *csv_filename = NULL;
+    yak_copt_t opt;
+    ketopt_t o = KETOPT_INIT;
+    yak_copt_init(&opt);
+    opt.pre = YAK_COUNTER_BITS;
+    opt.n_thread = 32;
+    char *csv_filename = NULL;
 
-	// =======================
-	// 解析命令行参数
-	// =======================
-	while ((c = ketopt(&o, argc, argv, 1, "k:p:K:t:b:H:o:m:L:c:", 0)) >= 0)
-	{
-		if (c == 'k')
-			opt.k = atoi(o.arg);
-		else if (c == 'p')
-			opt.pre = atoi(o.arg);
-		else if (c == 'K')
-			opt.chunk_size = atoi(o.arg);
-		else if (c == 't')
-			opt.n_thread = atoi(o.arg);
-		else if (c == 'b')
-			opt.bf_shift = atoi(o.arg);
-		else if (c == 'o')
-			fn_out = o.arg;
-		else if (c == 'm')
-			opt.mapping = atoi(o.arg);
-		else if (c == 'L')
-			opt.l = atoi(o.arg);
-		else if (c == 'c')
-			csv_filename = o.arg;
-		// else if (c == 'g')
-		//     gfa_filename = o.arg;
-	}
+    while ((c = ketopt(&o, argc, argv, 1, "k:p:K:t:b:H:o:m:L:c:1:2:", 0)) >= 0)
+    {
+        if (c == 'k')
+            opt.k = atoi(o.arg);
+        else if (c == 'p')
+            opt.pre = atoi(o.arg);
+        else if (c == 'K')
+            opt.chunk_size = atoi(o.arg);
+        else if (c == 't')
+            opt.n_thread = atoi(o.arg);
+        else if (c == 'b')
+            opt.bf_shift = atoi(o.arg);
+        else if (c == 'o')
+            fn_out = o.arg;
+        else if (c == 'm')
+            opt.mapping = atoi(o.arg);
+        else if (c == 'L')
+            opt.l = atoi(o.arg);
+        else if (c == 'c')
+            csv_filename = o.arg;
+        else if (c == '1')
+            hic_fn1_name = o.arg;
+        else if (c == '2')
+            hic_fn2_name = o.arg;
+    }
 
-	// =======================
-	// 参数检查
-	// =======================
-	if (argc - o.ind < 3)
-	{
-		fprintf(stderr, "Usage: HapFold hic_mapping [options] utg.fa hic_reads_1 hic_reads_2 -o gfa_hic.out \n");
-		fprintf(stderr, "Options:\n");
-		fprintf(stderr, "  -k INT     k-mer size [%d]\n", opt.k);
-		fprintf(stderr, "  -p INT     prefix length [%d]\n", opt.pre);
-		fprintf(stderr, "  -b INT     set Bloom filter size to 2**INT bits; 0 to disable [%d]\n", opt.bf_shift);
-		fprintf(stderr, "  -t INT     number of worker threads [%d]\n", opt.n_thread);
-		fprintf(stderr, "  -K INT     chunk size [100m]\n");
-		fprintf(stderr, "  -m INT     use haphic mapping\n");
-		fprintf(stderr, "  -c FILE    input node_type CSV file\n");
-		fprintf(stderr, "  -L INT     use model for phasing\n");
-		fprintf(stderr, "  -o FILE    save mapping relationship to FILE []\n");
-		fprintf(stderr, "  -g FILE    input GFA file (for debug)\n");
-		fprintf(stderr, "Note: -b37 is recommended for human reads\n");
-		return 1;
-	}
+    if (argc - o.ind < 1 || !hic_fn1_name || !hic_fn2_name)
+    {
+        fprintf(stderr, "Usage: HapFold mapping [options] -1 hic_reads_1 -2 hic_reads_2 -o mapping.txt utg.fa\n");
+        fprintf(stderr, "Options:\n");
+        fprintf(stderr, "  -1 FILE    Hi-C read 1 file\n");
+        fprintf(stderr, "  -2 FILE    Hi-C read 2 file\n");
+        fprintf(stderr, "  -k INT     k-mer size [%d]\n", opt.k);
+        fprintf(stderr, "  -p INT     prefix length [%d]\n", opt.pre);
+        fprintf(stderr, "  -b INT     set Bloom filter size to 2**INT bits; 0 to disable [%d]\n", opt.bf_shift);
+        fprintf(stderr, "  -t INT     number of worker threads [%d]\n", opt.n_thread);
+        fprintf(stderr, "  -K INT     chunk size [100m]\n");
+        fprintf(stderr, "  -c FILE    input node_type CSV file\n");
+        fprintf(stderr, "  -L INT     use model for phasing\n");
+        fprintf(stderr, "  -o FILE    save mapping relationship to FILE []\n");
+        fprintf(stderr, "Note: -b37 is recommended for human reads\n");
+        return 1;
+    }
 
-	if (opt.pre < YAK_COUNTER_BITS)
-	{
-		fprintf(stderr, "ERROR: -p should be at least %d\n", YAK_COUNTER_BITS);
-		return 1;
-	}
-	if (opt.k >= 64)
-	{
-		fprintf(stderr, "ERROR: -k must be smaller than 64\n");
-		return 1;
-	}
-	else if (opt.k >= 32)
-	{
-		fprintf(stderr, "WARNING: counts are inexact if -k is greater than 31\n");
-	}
-	cerr<<" in main_poreC_map_test"<<endl;
+    if (opt.pre < YAK_COUNTER_BITS)
+    {
+        fprintf(stderr, "ERROR: -p should be at least %d\n", YAK_COUNTER_BITS);
+        return 1;
+    }
+    if (opt.k >= 64)
+    {
+        fprintf(stderr, "ERROR: -k must be smaller than 64\n");
+        return 1;
+    }
+    else if (opt.k >= 32)
+    {
+        fprintf(stderr, "WARNING: counts are inexact if -k is greater than 31\n");
+    }
 
-	// =======================
-	// 输入文件解析
-	// =======================
-	// char *classpro_fn = argv[o.ind];	  // class 文件
-	char *query_fn = argv[o.ind];		  // query reads
-	char *hic_fn1_name = argv[o.ind + 1]; // Hi-C reads 1
-	char *hic_fn2_name = argv[o.ind + 2]; // Hi-C reads 2
+    char *query_fn = argv[o.ind];
 
-	// // 读取 GFA 文件
-	// asg_t *graph = gfa_read(gfa_filename);
-	// if (graph == NULL) {
-	//     fprintf(stderr, "ERROR: failed to read GFA file: %s\n", gfa_filename);
-	//     return 1;
-	// }
-	// 打开 reads 文件
-	// bseq_file_t *classpro_file = bseq_open(classpro_fn);
-	bseq_file_t *query_read = bseq_open(query_fn);
-	bseq_file_t *hic_fn1 = bseq_open(hic_fn1_name);
-	bseq_file_t *hic_fn2 = bseq_open(hic_fn2_name);
+    bseq_file_t *query_read = bseq_open(query_fn);
+    bseq_file_t *hic_fn1 = bseq_open(hic_fn1_name);
+    bseq_file_t *hic_fn2 = bseq_open(hic_fn2_name);
 
-	if (query_read == NULL || hic_fn1 == NULL || hic_fn2 == NULL)
-	{
-		fprintf(stderr, "ERROR: failed to open input read files\n");
-		return 1;
-	}
+    if (query_read == NULL || hic_fn1 == NULL || hic_fn2 == NULL)
+    {
+        fprintf(stderr, "ERROR: failed to open input files\n");
+        return 1;
+    }
 
-	if (csv_filename != NULL)
-	{
-		cout << "[INFO] Loading node types from " << csv_filename << " ..." << endl;
-		load_node_type_csv(csv_filename, node_type_map1);
-		std::cerr << "[INFO] Loaded " << node_type_map1.size()
-				  << " node types from " << csv_filename << std::endl;
-		cout << "[INFO] Loaded " << node_type_map1.size()
-			 << " node types from " << csv_filename << std::endl;
-	}
+    if (csv_filename != NULL)
+    {
+        std::cerr << "[INFO] Loading node types from " << csv_filename << " ..." << std::endl;
+        load_node_type_csv(csv_filename, node_type_map1);
+        std::cerr << "[INFO] Loaded " << node_type_map1.size()
+                  << " node types from " << csv_filename << std::endl;
+    }
 
-	// =======================
-	// Hi-C 处理主逻辑
-	// =======================
-	h = yak_count_multi_new(argv[o.ind], &opt, 0);
+    h = yak_count_multi_new(query_fn, &opt, 0);
 
-	//.....
-	do_mapping2(h, hic_fn1, hic_fn2, fn_out, node_type_map1);
+    do_mapping2(h, hic_fn1, hic_fn2, fn_out, node_type_map1);
 
-	free(h->h);
-	free(h);
-	return 0;
+    free(h->h);
+    free(h);
+    return 0;
 }
 

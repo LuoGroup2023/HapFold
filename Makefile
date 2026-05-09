@@ -10,8 +10,7 @@ INCLUDES = -I. -I$(SRC_DIR)
 
 UTILS_OBJS = hash.o dict.o array.o utils.o
 CORE_OBJS = kthread.o bbf.o htab.o bseq.o misc.o kalloc.o paf.o \
-            hic_mapping.o hic_completeness.o hic_qv.o count.o \
-            hic_switch_error.o seqio.o seqhash.o $(UTILS_OBJS)
+            mapping.o seqio.o seqhash.o $(UTILS_OBJS)
 
 
 OBJS = $(addprefix $(SRC_DIR)/, $(CORE_OBJS))

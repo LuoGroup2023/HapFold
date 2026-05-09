@@ -1,3 +1,15 @@
+/*
+ * HapFold - A graph-based haplotype reconstruction framework
+ * Copyright (C) 2024 Yichen Li 
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ * ...
+ */
+
+
 extern "C"
 {
 #include "paf.h"
@@ -7,9 +19,9 @@ extern "C"
 #include "graph.h"
 #include "sys.cpp"
 #include <fstream>
-#include "bubble_chain.h"
-#include "resolve_repeat_haplotype.h"
-#include "hic_mapping.h"
+#include "graph_refining.h"
+#include "phasing2scaffolding.h"
+#include "mapping.h"
 #define HapFold_VERSION "0.1"
 
 typedef struct
@@ -48,19 +60,24 @@ static ko_longopt_t long_options[] = {
 
 void Print_H(ps_opt_t *asm_opt)
 {
-	fprintf(stderr, "Usage: HapFold [options] <input> <output> <...>\n");
-	fprintf(stderr, "Options:\n");
-	fprintf(stderr, "  Assembly:\n");
-	fprintf(stderr, "    -o FILE       prefix of output files [%s]\n", asm_opt->output_file_name);
-	fprintf(stderr, "    -t INT        number of threads [%d]\n", asm_opt->thread_num);
-	fprintf(stderr, "    --version     show version number\n");
-	fprintf(stderr, "    -h            show help information\n");
+    fprintf(stderr, "\nUsage: HapFold <command> [options]\n\n");
+    
+    fprintf(stderr, "Commands:\n");
+    fprintf(stderr, "    mapping       Map Hi-C/Pore-C reads to the unitig sequences\n");
+    fprintf(stderr, "    scaffolding   Refine graph, phase haplotypes, and build scaffolds\n\n");
+    
+    fprintf(stderr, "Global Options:\n");
+    fprintf(stderr, "    -o FILE       prefix of output files/directory [%s]\n", asm_opt->output_file_name);
+    fprintf(stderr, "    -t INT        number of threads [%d]\n", asm_opt->thread_num);
+    fprintf(stderr, "    --version     show version number\n");
+    fprintf(stderr, "    -h            show help information\n\n");
 
-	fprintf(stderr, "Example: ./HapFold bubble_chain myfile.gfa -o []\n");
-	fprintf(stderr, "Example: ./HapFold resolve_repeats myfile.gfa [].paf.gz -o []\n");
-	fprintf(stderr, "Example: ./HapFold asm_component \n");
-	fprintf(stderr, "Example: ./HapFold filter_paf -t[n] myfile.gfa [].paf.gz -o [].paf \n");
-	//fprintf(stderr, "See `man ./HapFold.1' for detailed description of these command-line options.\n");
+    fprintf(stderr, "Examples:\n");
+    fprintf(stderr, "  Step 1. Hi-C/Pore-C Mapping:\n");
+    fprintf(stderr, "    ./HapFold mapping -t 32 -1 hic_1.fq.gz -2 hic_2.fq.gz -o mapping.txt utg.fa\n\n");
+    
+    fprintf(stderr, "  Step 2. Scaffolding (Graph refining & Phasing):\n");
+    fprintf(stderr, "    ./HapFold scaffolding mapping.txt assembly.gfa out_dir -1 hap1.p_ctg.gfa -2 hap2.p_ctg.gfa -u utg_ctg.csv\n\n");
 }
 
 static inline int64_t mm_parse_num(const char *str)
@@ -136,14 +153,13 @@ std::vector<NamedBubbleContig> read_named_bubble_contigs(const std::string &file
 
 	return result;
 }
-int main_resolve_haplotypes(int argc, char *argv[])
+int main_phasing_scaffolding(int argc, char *argv[])
 {
     ketopt_t o = KETOPT_INIT;
     int c;
 
     GlobalParams g_params;
 
-    // 1. 增加控制 12M 和 300K 的长参数选项 (代号 303, 304)
     static ko_longopt_t longopts[] = {
         {"hic_scaffold_threshold_ratio", ko_required_argument, 301},
         {"debug", ko_no_argument, 302}, 
@@ -186,7 +202,7 @@ int main_resolve_haplotypes(int argc, char *argv[])
 
     if (argc - o.ind < 3)
     {
-        fprintf(stderr, "\nUsage: GraPhaser resolve_haplotypes [options] <hic_mapping.out> <assembly.gfa> <output_dir> -1 *.hap1.p_ctg.gfa -2 *.hap2.p_ctg.gfa -u utg_ctg_file \n\n");
+        fprintf(stderr, "\nUsage: HapFold scaffolding [options] <mapping.txt> <assembly.gfa> <output_dir> -1 *.hap1.p_ctg.gfa -2 *.hap2.p_ctg.gfa -u utg_ctg_file \n\n");
         fprintf(stderr, "Options:\n");
         fprintf(stderr, "  -t INT      Number of threads [%d]\n", g_params.n_threads);
         fprintf(stderr, "  -n INT      Expected number of chromosomes (e.g., 78 for chicken) [%d]\n", g_params.n_chrs);
@@ -269,7 +285,7 @@ int main_resolve_haplotypes(int argc, char *argv[])
         printf("[INFO] Default mode enabled. Using standard phasing functions.\n");
         bubble_chain_graph = phasing_10_7(graph, string(output_directory), connections_foward, connections_backward);
 
-        // 2. 将之前散落的各种参数整合进 g_params 统一传递
+        
         if (g_params.debug_mode) {
             printf("[INFO] Debug mode enabled. Executing get_haplotype_path_test_code...\n");
             get_haplotype_path_test_code(connections_foward, connections_backward, graph, bubble_chain_graph,
@@ -286,79 +302,11 @@ int main_resolve_haplotypes(int argc, char *argv[])
 
 
 
-int main_hic_mapping(int argc, char *argv[])
+int mapping(int argc, char *argv[])
 {
 	return main_poreC_map_test(argc, argv);
 }
 
-int main_count(int argc, char *argv[])
-{
-	// yak_ch_t *h;
-	// int c;
-	// char *fn_out = 0;
-	// yak_copt_t opt;
-	// ketopt_t o = KETOPT_INIT;
-	// yak_copt_init(&opt);
-	// while ((c = ketopt(&o, argc, argv, 1, "k:p:K:t:b:H:o:", 0)) >= 0)
-	// {
-	// 	if (c == 'k')
-	// 		opt.k = atoi(o.arg);
-	// 	else if (c == 'p')
-	// 		opt.pre = atoi(o.arg);
-	// 	else if (c == 'K')
-	// 		opt.chunk_size = atoi(o.arg);
-	// 	else if (c == 't')
-	// 		opt.n_thread = atoi(o.arg);
-	// 	else if (c == 'b')
-	// 		opt.bf_shift = atoi(o.arg);
-	// 	else if (c == 'H')
-	// 		opt.bf_n_hash = mm_parse_num(o.arg);
-	// 	else if (c == 'o')
-	// 		fn_out = o.arg;
-	// }
-	// if (argc - o.ind < 1)
-	// {
-	// 	fprintf(stderr, "Usage: HapFold count [options] <in.fa> [in.fa]\n");
-	// 	fprintf(stderr, "Options:\n");
-	// 	fprintf(stderr, "  -k INT     k-mer size [%d]\n", opt.k);
-	// 	fprintf(stderr, "  -p INT     prefix length [%d]\n", opt.pre);
-	// 	fprintf(stderr, "  -b INT     set Bloom filter size to 2**INT bits; 0 to disable [%d]\n", opt.bf_shift);
-	// 	fprintf(stderr, "  -H INT     use INT hash functions for Bloom filter [%d]\n", opt.bf_n_hash);
-	// 	fprintf(stderr, "  -t INT     number of worker threads [%d]\n", opt.n_thread);
-	// 	fprintf(stderr, "  -o FILE    dump the count hash table to FILE []\n");
-	// 	fprintf(stderr, "  -K INT     chunk size [100m]\n");
-	// 	fprintf(stderr, "Note: -b37 is recommended for human reads\n");
-	// 	return 1;
-	// }
-	// if (opt.pre < YAK_COUNTER_BITS)
-	// {
-	// 	fprintf(stderr, "ERROR: -p should be at least %d\n", YAK_COUNTER_BITS);
-	// 	return 1;
-	// }
-	// if (opt.k >= 64)
-	// {
-	// 	fprintf(stderr, "ERROR: -k must be smaller than 64\n");
-	// 	return 1;
-	// }
-	// else if (opt.k >= 32)
-	// {
-	// 	fprintf(stderr, "WARNING: counts are inexact if -k is greater than 31\n");
-	// }
-	// h = yak_count(argv[o.ind], &opt, 0);
-	// if (opt.bf_shift > 0)
-	// {
-	// 	yak_ch_destroy_bf(h);
-	// 	yak_ch_clear(h, opt.n_thread);
-	// 	h = yak_count(argc - o.ind >= 2 ? argv[o.ind + 1] : argv[o.ind], &opt, h);
-	// 	yak_ch_shrink(h, 2, YAK_MAX_COUNT, opt.n_thread);
-	// 	fprintf(stderr, "[M::%s] %ld distinct k-mers after shrinking\n", __func__, (long)h->tot);
-	// }
-
-	// if (fn_out)
-	// 	yak_ch_dump(h, fn_out);
-	// yak_ch_destroy(h);
-	return 0;
-}
 
 int main(int argc, char *argv[])
 {
@@ -372,20 +320,17 @@ int main(int argc, char *argv[])
 	{
 		fprintf(stderr, "Usage: HapFold <command> <arguments> <inputs>\n");
 		fprintf(stderr, "Commands:\n");
-		fprintf(stderr, "  resolve_haplotypes    use hic data to resolve haplotypes\n");
-		fprintf(stderr, "  hic_mapping           map hic data to sequences in the graph\n");
-		fprintf(stderr, "  count                 count k-mers\n");
+		fprintf(stderr, "  scaffolding    		 use Hi-C/Pore-C data to resolve haplotypes\n");
+		fprintf(stderr, "  mapping           	 map Hi-C/Pore-C data to sequences in the graph\n");
 		fprintf(stderr, "  version               print version number\n");
 		return 1;
 	}
 	yak_reset_realtime();
 	t_start = yak_realtime();
-	if (strcmp(argv[1], "resolve_haplotypes") == 0)
-		ret = main_resolve_haplotypes(argc - 1, argv + 1);
-	else if (strcmp(argv[1], "hic_mapping") == 0)
-		ret = main_hic_mapping(argc - 1, argv + 1);
-	else if (strcmp(argv[1], "count") == 0)
-		ret = main_count(argc - 1, argv + 1);
+	if (strcmp(argv[1], "scaffolding") == 0)
+		ret = main_phasing_scaffolding(argc - 1, argv + 1);
+	else if (strcmp(argv[1], "mapping") == 0)
+		ret = mapping(argc - 1, argv + 1);
 	else if (strcmp(argv[1], "version") == 0)
 	{
 		printf("HapFold: %s\n", HapFold_VERSION);

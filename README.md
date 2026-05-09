@@ -1,4 +1,4 @@
-# HapFold: Efficient and Accurate Chromosome-Scale Haplotype Reconstruction
+# HapFold: Efficient and Accurate T2T-level Haplotype Reconstruction
 
 [![BioConda Downloads](https://img.shields.io/conda/dn/bioconda/hapfold?label=bioconda%20downloads)](https://anaconda.org/bioconda/hapfold)
 [![BioConda Version](https://img.shields.io/conda/vn/bioconda/hapfold?label=bioconda)](https://anaconda.org/bioconda/hapfold)
@@ -110,4 +110,7 @@ HapFold resolve_haplotypes -t 32 -n chr -u utg_ctg_mappings.csv -i true map.out 
 | `-p` | Enable plant mode (uses alternative phasing algorithms optimized for complex genomes). |
 | `-d`, `--debug` | Enable debug mode to run internal test code functions. |
 | `--hic_scaffold_threshold_ratio FLOAT` | Threshold ratio for sequence-based Hi-C scaffolding extensions [0.60]. |
-```
+
+
+## Citation
+If you use HapFold in your research, please cite:
