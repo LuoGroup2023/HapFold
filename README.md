@@ -4,7 +4,7 @@
 [![BioConda Version](https://img.shields.io/conda/vn/bioconda/hapfold?label=bioconda)](https://anaconda.org/bioconda/hapfold)
 [![License](https://img.shields.io/github/license/LuoGroup2023/HapFold)](https://github.com/LuoGroup2023/HapFold/blob/main/LICENSE)
 [![Release](https://img.shields.io/github/v/release/LuoGroup2023/HapFold?sort=semver)](https://github.com/LuoGroup2023/HapFold/releases)
-[![Downloads](https://img.shields.io/github/downloads/LuoGroup2023/HapFold/total)](https://github.com/LuoGroup2023/HapFold/releases)
+[![Views](https://komarev.com/ghpvc/?username=LuoGroup2023-HapFold&label=Views&color=009E73&style=flat)](https://github.com/LuoGroup2023/HapFold)
 [![Stars](https://img.shields.io/github/stars/LuoGroup2023/HapFold?style=social)](https://github.com/LuoGroup2023/HapFold/stargazers)
 
 ## Description
