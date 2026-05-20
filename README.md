@@ -9,9 +9,9 @@
 
 ## Description
 
-**HapFold** is a scaffolding framework designed for the highly accurate, chromosome-scale haplotype reconstruction of diploid genomes. 
+**HapFold**  is the first hybrid scaffolding framework that synergistically leverages the complementary strengths of graph-based and sequence-based approaches to achieve chromosome-scale, near-T2T haplotype reconstructions for diploid genomes.
 
-By uniquely integrating the synergistic features of both **graph-based** and **sequence-based** paradigms, HapFold achieves significantly lower misassignment rates and higher computational efficiency than existing methods. Furthermore, when applied to diploid genomes sequenced with standard ONT simplex reads, HapFold enables the robust and scalable reconstruction of a greater number of **near-T2T (telomere-to-telomere)** assemblies.
+By integrating the topological accuracy of assembly graphs with proximity-guided sequence contiguity, HapFold eliminates the structural errors and chromosomal misassignments common in traditional pipelines. Notably, HapFold accelerates computation by an order of magnitude while delivering superior assembly quality. Even when working with standard Oxford Nanopore Technologies (ONT) simplex reads, it enables the reconstruction of a greater number of near-T2T assemblies, providing a robust and scalable solution for high-fidelity diploid genome assembly.
 
 ## Installation and Dependencies
 
