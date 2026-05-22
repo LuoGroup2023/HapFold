@@ -60,10 +60,9 @@ HapFold is primarily designed for **diploid genome scaffolding** using Hi-C data
 Usage: HapFold <command> <arguments> <inputs>
 
 Commands:
-  resolve_haplotypes    Use Hi-C data to resolve haplotypes and scaffold
-  hic_mapping           Map Hi-C data to sequences in the graph
-  count                 Count k-mers
-  version               Print version number
+  scaffolding            use Hi-C/Pore-C data to resolve haplotypes
+  mapping                map Hi-C/Pore-C data to sequences in the graph
+  version                print version number
 ```
 
 ### Step 1: Hi-C Mapping (`hic_mapping`)
@@ -74,27 +73,27 @@ awk '/^S/{print ">"$2;print $3}' hifiasm_p_utg.gfa > hifiasm_p_utg.fa
 
 Then, map the raw Hi-C reads to these node sequences:
 ```bash
-HapFold hic_mapping -t 32 -o map.out hifiasm_p_utg.fa hic.R1.fastq.gz hic.R2.fastq.gz
+HapFold mapping -t 32 -1 hic.R1.fastq.gz -2 hic.R2.fastq.gz -o mapping.txt hifiasm_p_utg.fa
 ```
 
-**Key Options for `hic_mapping`:**
+**Key Options for `mapping`:**
+* `-1 FILE, -2 FILE `: (Required) Paths to Hi-C forward (R1) and reverse (R2) reads.
 * `-t INT`: Number of worker threads [32]
 * `-o FILE`: Output file to save the mapping relationships (e.g., `map.out`)
 * `-k INT`: k-mer size [31]
-* `-p INT`: prefix length [22]
-* `-b INT`: set Bloom filter size to `2**INT` bits; `-b 37` is recommended for large/human genomes.
+
 
 ---
 
-### Step 2: Haplotype Resolution (`resolve_haplotypes`)
+### Step 2: Haplotype Resolution (`scaffolding`)
 Once the mapping is complete, use the mapping results alongside the GFA files to resolve haplotypes and build chromosome-scale scaffolds.
 
 ```bash
-HapFold resolve_haplotypes -t 32 -n chr -u utg_ctg_mappings.csv -i true map.out hifiasm_p_utg.gfa output_dir -1 hap1.p_ctg.gfa -2 hap2.p_ctg.gfa
+HapFold scaffolding -t 32 -n 78 -u utg_ctg_mappings.csv -i true -1 hap1.p_ctg.gfa -2 hap2.p_ctg.gfa mapping.txt hifiasm_p_utg.gfa output_dir
 ```
 *(Positional arguments: `<mapping_result> <unitig.gfa> <output_directory>`)*
 
-**Key Options for `resolve_haplotypes`:**
+**Key Options for `scaffolding`:**
 
 | Option | Description |
 | :--- | :--- |
