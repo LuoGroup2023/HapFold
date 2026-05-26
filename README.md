@@ -113,4 +113,6 @@ HapFold scaffolding -t 32 -n 78 -u utg_ctg_mappings.csv -i true -1 hap1.p_ctg.gf
 
 ## Citation
 If you use HapFold in your research, please cite:
+```text
 https://doi.org/10.64898/2026.05.20.726711
+```
