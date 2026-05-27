@@ -89,7 +89,7 @@ HapFold mapping -t 32 -1 hic.R1.fastq.gz -2 hic.R2.fastq.gz -o mapping.txt hifia
 Once the mapping is complete, use the mapping results alongside the GFA files to resolve haplotypes and build chromosome-scale scaffolds.
 
 ```bash
-HapFold scaffolding -t 32 -n 78 -u utg_ctg_mappings.csv -i true -1 hap1.p_ctg.gfa -2 hap2.p_ctg.gfa mapping.txt hifiasm_p_utg.gfa output_dir
+Usage: HapFold scaffolding [options] <mapping.txt> <assembly.gfa> <output_dir> -1 *.hap1.p_ctg.gfa -2 *.hap2.p_ctg.gfa
 ```
 *(Positional arguments: `<mapping_result> <unitig.gfa> <output_directory>`)*
 

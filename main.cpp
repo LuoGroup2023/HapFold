@@ -202,13 +202,13 @@ int main_phasing_scaffolding(int argc, char *argv[])
 
     if (argc - o.ind < 3)
     {
-        fprintf(stderr, "\nUsage: HapFold scaffolding [options] <mapping.txt> <assembly.gfa> <output_dir> -1 *.hap1.p_ctg.gfa -2 *.hap2.p_ctg.gfa -u utg_ctg_file \n\n");
+        fprintf(stderr, "\nUsage: HapFold scaffolding [options] <mapping.txt> <assembly.gfa> <output_dir> -1 *.hap1.p_ctg.gfa -2 *.hap2.p_ctg.gfa\n\n");
         fprintf(stderr, "Options:\n");
         fprintf(stderr, "  -t INT      Number of threads [%d]\n", g_params.n_threads);
         fprintf(stderr, "  -n INT      Expected number of chromosomes (e.g., 78 for chicken) [%d]\n", g_params.n_chrs);
         fprintf(stderr, "  -e STR      Restriction enzymes separated by comma (e.g., GATC,GANTC) [%s]\n", g_params.enzymes_unsplit.c_str());
         fprintf(stderr, "  -c FILE     Path to contig_hap_nodes.txt (debug for Hi-C phasing)\n");
-        fprintf(stderr, "  -u FILE     Path to utg_to_ctg relationship file [optional]\n");
+        fprintf(stderr, "  -u FILE     Output path/name for the UTG-CTG mapping file [default: <output_dir>/utg_ctg_mappings.csv]\n");
         fprintf(stderr, "  -1 FILE     Path to haplotype 1 GFA file (*.hap1.p_ctg.gfa)\n");
         fprintf(stderr, "  -2 FILE     Path to haplotype 2 GFA file (*.hap2.p_ctg.gfa)\n");
         fprintf(stderr, "  -i BOOL     Enable identity check on contigs (true/false) [%s]\n", (g_params.check_identity ? "true" : "false"));
@@ -245,6 +245,30 @@ int main_phasing_scaffolding(int argc, char *argv[])
     char *connectionFile = argv[o.ind];
     char *gfa_filename = argv[o.ind + 1];
     char *output_directory = argv[o.ind + 2];
+
+    if (g_params.utg_ctg_file.empty())
+    {
+        std::string out_dir = std::string(output_directory);
+        if (!out_dir.empty() && out_dir.back() != '/')
+            out_dir += "/";
+
+        g_params.utg_ctg_file = out_dir + "utg_ctg_mappings.csv";
+
+        fprintf(stderr, "[INFO] No -u provided. Using default UTG-CTG mapping file: %s\n",
+                g_params.utg_ctg_file.c_str());
+    }
+    else
+    {
+        fprintf(stderr, "[INFO] Using user-specified UTG-CTG mapping file: %s\n",
+                g_params.utg_ctg_file.c_str());
+    }
+
+
+    if (g_params.hap1_gfa.empty() || g_params.hap2_gfa.empty())
+    {
+        fprintf(stderr, "[ERROR] Both -1 <hap1.p_ctg.gfa> and -2 <hap2.p_ctg.gfa> are required for UTG-CTG mapping and phasing.\n");
+        return 1;
+    }
     printf("start main\n");
     asg_t *graph = gfa_read(gfa_filename);
     map<uint32_t, map<uint32_t, set<uint32_t>>> *bubble_chain_graph = nullptr;
