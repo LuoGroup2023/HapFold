@@ -110,7 +110,25 @@ Usage: HapFold scaffolding [options] <mapping.txt> <assembly.gfa> <output_dir> -
 | `-d`, `--debug` | Enable debug mode to run internal test code functions. |
 | `--hic_scaffold_threshold_ratio FLOAT` | Threshold ratio for sequence-based Hi-C scaffolding extensions [0.60]. |
 
+## Expected Outputs & Key Notes
 
+After successfully running the `scaffolding` command, HapFold generates several crucial sequence files in your specified `<output_dir>`.
+
+### ⚠️ CRITICAL NOTICE on Haplotype Completeness
+
+To obtain the **complete** genome assembly, you **MUST combine both the unresolved single chains and the phased scaffolds**.
+
+HapFold splits the output based on graph topologies (Single Chains vs. Bubble Chains):
+1. **`hap_contig.fa` (Single Chains)**: Contains sequences derived from unresolved single chains in the graph. This typically includes **sex chromosomes (X/Y or Z/W)** and ultra-conserved homozygous blocks where haplotypes cannot be topologically or proximally differentiated.
+2. **`scaffold.fa` (or `phasing_hap1.fa` / `phasing_hap2.fa`) (Bubble Chains)**: Contains chromosome-scale scaffolds resolved from bubble chains, representing the successfully phased autosomal diploid regions.
+
+#### Assembly Completeness Formula
+
+Run the following commands to merge both components into the final complete assembly:
+```bash
+cd <output_dir>
+cat hap_contig.fa scaffold.fa > all_scaffold.fa
+```
 ## Citation
 If you use HapFold in your research, please cite:
 ```text
