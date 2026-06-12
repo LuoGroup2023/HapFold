@@ -188,8 +188,8 @@ int main_phasing_scaffolding(int argc, char *argv[])
             g_params.contig_hap_file = string(o.arg);
         else if (c == 'n')
             g_params.n_chrs = atoi(o.arg);
-        else if (c == 'p') 
-            g_params.is_plant = true;
+        // else if (c == 'p') 
+        //     g_params.is_plant = true;
         else if (c == 'd' || c == 302) 
             g_params.debug_mode = true;
         else if (c == 301) 
@@ -213,7 +213,7 @@ int main_phasing_scaffolding(int argc, char *argv[])
         fprintf(stderr, "  -2 FILE     Path to haplotype 2 GFA file (*.hap2.p_ctg.gfa)\n");
         fprintf(stderr, "  -i BOOL     Enable identity check on contigs (true/false) [%s]\n", (g_params.check_identity ? "true" : "false"));
         fprintf(stderr, "  -f FILE     Precomputed identity file path; if omitted, check will run automatically [%s]\n", g_params.identityFile.c_str());
-        fprintf(stderr, "  -p          Enable plant mode (uses alternative phasing algorithms) [optional]\n"); 
+        // fprintf(stderr, "  -p          Enable plant mode (uses alternative phasing algorithms) [optional]\n"); 
         fprintf(stderr, "  -d, --debug Enable debug mode to run test code functions [optional]\n"); 
         fprintf(stderr, "  --hic_scaffold_threshold_ratio FLOAT  Threshold ratio for Hi-C scaffolding [%.2f]\n", g_params.hic_scaffold_threshold_ratio);
         fprintf(stderr, "  --chain_len_thresh INT                Length threshold to join contig_chain for iterative merging [%d]\n", g_params.chain_len_threshold);
@@ -299,13 +299,13 @@ int main_phasing_scaffolding(int argc, char *argv[])
     
     std::string utg_gfa = std::string(gfa_filename);
 
-    if (g_params.is_plant)
-    {
-        printf("[INFO] Plant mode enabled. Using alternative phasing functions.\n");
-        bubble_chain_graph = phasing_plant_version(graph, string(output_directory), connections_foward, connections_backward);
-    }
-    else
-    {
+    // if (g_params.is_plant)
+    // {
+    //     printf("[INFO] Plant mode enabled. Using alternative phasing functions.\n");
+    //     bubble_chain_graph = phasing_plant_version(graph, string(output_directory), connections_foward, connections_backward);
+    // }
+    // else
+    // {
         printf("[INFO] Default mode enabled. Using standard phasing functions.\n");
         bubble_chain_graph = phasing_10_7(graph, string(output_directory), connections_foward, connections_backward);
 
@@ -319,7 +319,7 @@ int main_phasing_scaffolding(int argc, char *argv[])
             get_haplotype_path_now(connections_foward, connections_backward, graph, bubble_chain_graph,
                                    output_directory, named_bubble_contigs, gfa_filename, g_params);
         }
-    }
+    // }
     return 0;
 }
 
