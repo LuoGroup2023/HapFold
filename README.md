@@ -79,7 +79,24 @@ Commands:
   version                print version number
 ```
 
+### Step 0: Pore-C Preprocessing (Optional)
+
+Pore-C data can be used with HapFold after being converted into a Hi-C-like paired-contact format.
+
+We recommend using the official EPI2ME Pore-C pipeline (`pore-c-py`) for this conversion:
+
+https://github.com/epi2me-labs/pore-c-py
+
+After obtaining the converted results, HapFold provides a C++ utility in the `scripts/` directory to split them into paired files suitable for HapFold mapping.
+
+Alternatively, Falign can be used to generate Hi-C-like contacts directly from Pore-C data:
+
+https://github.com/xiaochuanle/Falign
+
+The resulting paired files can then be used with the standard HapFold workflow, including the `mapping` and `scaffolding` steps. Since HapFold supports variable-length paired sequences, Pore-C-derived pairs can be used directly after conversion.
+
 ### Step 1: Hi-C Mapping (`mapping`)
+
 Before mapping, you need to extract the node sequences from your hifiasm unitig graph into a FASTA file:
 ```bash
 awk '/^S/{print ">"$2;print $3}' hifiasm_p_utg.gfa > hifiasm_p_utg.fa
@@ -111,17 +128,17 @@ Usage: HapFold scaffolding [options] <mapping.txt> <assembly.gfa> <output_dir> -
 
 | Option | Description |
 | :--- | :--- |
-| `-t INT` | Number of threads [8]. |
-| `-n INT` | Expected number of chromosomes (e.g., `46` for human, `78` for chicken) [0]. |
-| `-1 FILE` | **(Required)** Path to haplotype 1 GFA file (`*.hap1.p_ctg.gfa`). |
-| `-2 FILE` | **(Required)** Path to haplotype 2 GFA file (`*.hap2.p_ctg.gfa`). |
-| `-u FILE` | Path to `utg_to_ctg` relationship file. Highly recommended for accurate graph traversing. |
-| `-i BOOL` | Enable identity check on contigs (`true`/`false`) [false]. |
-| `-f FILE` | Precomputed identity file path; if omitted but `-i true`, the check will run automatically. |
-| `-e STR` | Restriction enzymes separated by comma (e.g., `GATC,GANTC`) [ ]. |
-| `-c FILE` | Path to `contig_hap_nodes.txt` (required for specific Hi-C phasing modes). |
-| `-d`, `--debug` | Enable debug mode to run internal test code functions. |
+| `-n INT`                               | **(Required) **Expected number of chromosomes (e.g., `46` for human, `78` for chicken) . |
+| `-1 FILE`                              | **(Required)** Path to haplotype 1 GFA file (`*.hap1.p_ctg.gfa`). |
+| `-2 FILE`                              | **(Required)** Path to haplotype 2 GFA file (`*.hap2.p_ctg.gfa`). |
+| `-u FILE`                              | Path to `utg_to_ctg` relationship file. Highly recommended for accurate graph traversing. |
+| `-i BOOL`                              | Enable identity check on contigs (`true`/`false`) [false].   |
+| `-f FILE`                              | Precomputed identity file path; if omitted but `-i true`, the check will run automatically. |
+| `-e STR`                               | Restriction enzymes separated by comma (e.g., `GATC,GANTC`) [ ]. |
+| `-c FILE`                              | Path to `contig_hap_nodes.txt` (required for specific Hi-C phasing modes). |
+| `-d`, `--debug`                        | Enable debug mode to run internal test code functions.       |
 | `--hic_scaffold_threshold_ratio FLOAT` | Threshold ratio for sequence-based Hi-C scaffolding extensions [0.60]. |
+| `-t INT`                               | Number of threads [8].                                       |
 
 ### Demo with rice test data
 
@@ -134,10 +151,10 @@ HapFold scaffolding \
   -t 32 \
   -n 24 \
   mapping.txt \
-  rice.p_utg.gfa \
+  p_utg.gfa \
   rice_hapfold_out \
-  -1 rice.hap1.p_ctg.gfa \
-  -2 rice.hap2.p_ctg.gfa
+  -1 hap1.p_ctg.gfa \
+  -2 hap2.p_ctg.gfa
 ```
 
 The expected output files include:
