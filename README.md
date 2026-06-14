@@ -128,7 +128,7 @@ Usage: HapFold scaffolding [options] <mapping.txt> <assembly.gfa> <output_dir> -
 
 | Option | Description |
 | :--- | :--- |
-| `-n INT`                               | **(Required) **Expected number of chromosomes (e.g., `46` for human, `78` for chicken) . |
+| `-n INT`                               | **(Required)**Expected number of chromosomes (e.g., `46` for human, `78` for chicken) . |
 | `-1 FILE`                              | **(Required)** Path to haplotype 1 GFA file (`*.hap1.p_ctg.gfa`). |
 | `-2 FILE`                              | **(Required)** Path to haplotype 2 GFA file (`*.hap2.p_ctg.gfa`). |
 | `-u FILE`                              | Path to `utg_to_ctg` relationship file. Highly recommended for accurate graph traversing. |
