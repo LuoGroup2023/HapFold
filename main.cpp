@@ -159,7 +159,7 @@ int main_phasing_scaffolding(int argc, char *argv[])
     int c;
 
     GlobalParams g_params;
-
+    g_params.n_chrs = -1;
     static ko_longopt_t longopts[] = {
         {"hic_scaffold_threshold_ratio", ko_required_argument, 301},
         {"debug", ko_no_argument, 302}, 
@@ -202,7 +202,7 @@ int main_phasing_scaffolding(int argc, char *argv[])
 
     if (argc - o.ind < 3)
     {
-        fprintf(stderr, "\nUsage: HapFold scaffolding [options] <mapping.txt> <assembly.gfa> <output_dir> -1 *.hap1.p_ctg.gfa -2 *.hap2.p_ctg.gfa\n\n");
+        fprintf(stderr, "\nUsage: HapFold scaffolding [options] <mapping.txt> <assembly.gfa> <output_dir> -1 *.hap1.p_ctg.gfa -2 *.hap2.p_ctg.gfa -n chr_number\n\n");
         fprintf(stderr, "Options:\n");
         fprintf(stderr, "  -t INT      Number of threads [%d]\n", g_params.n_threads);
         fprintf(stderr, "  -n INT      Expected number of chromosomes (e.g., 78 for chicken) [%d]\n", g_params.n_chrs);
@@ -264,9 +264,9 @@ int main_phasing_scaffolding(int argc, char *argv[])
     }
 
 
-    if (g_params.hap1_gfa.empty() || g_params.hap2_gfa.empty())
+    if (g_params.hap1_gfa.empty() || g_params.hap2_gfa.empty() || g_params.n_chrs==-1)
     {
-        fprintf(stderr, "[ERROR] Both -1 <hap1.p_ctg.gfa> and -2 <hap2.p_ctg.gfa> are required for UTG-CTG mapping and phasing.\n");
+        fprintf(stderr, "[ERROR] -1 <hap1.p_ctg.gfa>, -2 <hap2.p_ctg.gfa>, and -n <chr_number> are required for UTG-CTG mapping and phasing.\n");
         return 1;
     }
     printf("start main\n");
