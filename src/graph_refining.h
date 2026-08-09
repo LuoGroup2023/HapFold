@@ -1199,7 +1199,7 @@ void print_graph_edges(asg_t *graph)
                  << (to & 1 ? " [rev]" : " [fwd]") << ")" << endl;
         }
 
-        uint32_t in_degree = asg_arc_n(graph, v ^ 1); // 入边 = 反向边的出边
+        uint32_t in_degree = asg_arc_n(graph, v ^ 1);
         asg_arc_t *in_arcs = asg_arc_a(graph, v ^ 1);
         cout << "  In-degree: " << in_degree << endl;
         for (uint32_t i = 0; i < in_degree; ++i)
@@ -1962,7 +1962,7 @@ void debug_classify_type3_nodes2(asg_t *g, int *node_type,
                 return found_extend;
             };
 
-            // 从from开始做DFS
+
             std::set<uint32_t> visited;
             visited.insert(i ^ 1);
             visited.insert(i);
@@ -3028,7 +3028,7 @@ void extract_bubble_chains_by_dfs(asg_t *g,
     write_gfa_file(output_directory + "/main_graph.gfa", g, bubble_chains, false);
 
     ofstream node_colors(output_directory + string("/") + string("main_graph_colors.csv"));
-    node_colors << "NodeName,Color" << endl; // CSV 表头
+    node_colors << "NodeName,Color" << endl;
 
     unordered_set<uint32_t> printed_nodes;
     unordered_set<uint32_t> bubble_endpoints;
@@ -3553,7 +3553,7 @@ void sequence_hap_chains(asg_t *g, std::vector<hap_chain_result_t> &chain_result
 //                     if (used.count(next))
 //                         continue;
 
-//                     // 延申成功
+
 //                     cur = next;
 //                     used.insert(cur);
 //                     if (asg_arc_n(g, cur) == 1 && asg_arc_n(g, cur ^ 1) == 1)
@@ -3678,7 +3678,7 @@ void sequence_hap_chains(asg_t *g, std::vector<hap_chain_result_t> &chain_result
 //                     if (used.count(next))
 //                         continue;
 
-//                     // 延申成功
+
 //                     cur = next;
 //                     used.insert(cur);
 //                     if (asg_arc_n(g, cur) == 1 && asg_arc_n(g, cur ^ 1) == 1)

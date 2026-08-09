@@ -36,32 +36,32 @@ typedef struct
 	uint32_t cnt; // number of entries
 } yak_poslist_t;
 
-// 使用 khashl 生成 kmer -> yak_poslist_t 的 map
-// 我们用前缀 yak_pos （会生成 yak_pos_put, yak_pos_get, yak_pos_init, yak_pos_destroy 等）
+
+
 KHASHL_MAP_INIT(KH_LOCAL, yak_ht_pos_t, yak_pos, uint64_t, yak_poslist_t, kh_hash_uint64, kh_eq_generic)
-// 上面宏等价于：
+
 // HType = yak_ht_pos_t
 // prefix = yak_pos
 // key type = uint64_t
 // val type = yak_poslist_t
-// hash fn = kh_hash_uint64（在 khashl.h 中已声明）
+
 // eq fn = kh_eq_generic
 
 typedef struct
 {
-	yak_ht_pos_t *h; // khashl map pointer (实际类型由宏定义)
+	yak_ht_pos_t *h;
 	yak_occ_t *occ_pool;
 	uint64_t occ_cap;
 	uint64_t occ_size;
 } yak_ch_pos_t;
 
-// 初始化
+
 yak_ch_pos_t *yak_ch_pos_init(size_t init_cap)
 {
 	yak_ch_pos_t *p = (yak_ch_pos_t *)calloc(1, sizeof(yak_ch_pos_t));
 	if (!p)
 		return NULL;
-	p->h = yak_pos_init(); // 由宏生成的初始化函数
+	p->h = yak_pos_init();
 	p->occ_cap = init_cap ? init_cap : (1ULL << 20);
 	p->occ_size = 0;
 	p->occ_pool = (yak_occ_t *)malloc(sizeof(yak_occ_t) * p->occ_cap);
@@ -73,7 +73,7 @@ yak_ch_pos_t *yak_ch_pos_init(size_t init_cap)
 	return p;
 }
 
-// 销毁
+
 void yak_ch_pos_destroy(yak_ch_pos_t *p)
 {
 	if (!p)
@@ -85,7 +85,7 @@ void yak_ch_pos_destroy(yak_ch_pos_t *p)
 	free(p);
 }
 
-// 内部扩容 occ_pool
+
 static inline void yak_ch_pos_ensure_cap(yak_ch_pos_t *p, uint64_t need)
 {
 	if (p->occ_size + need <= p->occ_cap)
@@ -97,26 +97,26 @@ static inline void yak_ch_pos_ensure_cap(yak_ch_pos_t *p, uint64_t need)
 	p->occ_cap = newcap;
 }
 
-// 插入单个 occurrence 到表中
-// kmer: 使用与 yak 中一致的 kmer 编码（应与主表 key 一致）
-// read_id,pos,strand: occurrence 信息
+
+
+
 static inline void
 yak_ch_pos_insert_one(yak_ch_pos_t *p, uint64_t kmer,
 					  uint32_t read_id, uint32_t pos, uint8_t strand)
 {
 	int absent;
-	// 调用宏生成的 put （prefix_put）
+
 	khint_t idx = yak_pos_put(p->h, kmer, &absent);
-	yak_poslist_t *pl = &kh_val(p->h, idx); // kh_val 宏可用
+	yak_poslist_t *pl = &kh_val(p->h, idx);
 	if (absent)
 	{
-		// 第一次见到 kmer，pl->off 要指向当前 pool 末尾
+
 		pl->off = p->occ_size;
 		pl->cnt = 0;
 	}
-	// 确保 pool 容量
+
 	yak_ch_pos_ensure_cap(p, 1);
-	// 写入 occurrence
+
 	yak_occ_t *occ = &p->occ_pool[p->occ_size++];
 	occ->read_id = read_id;
 	occ->pos = pos;
@@ -124,8 +124,8 @@ yak_ch_pos_insert_one(yak_ch_pos_t *p, uint64_t kmer,
 	pl->cnt++;
 }
 
-// 查询函数：返回 poslist（指向 pool 的片段）
-// 返回 pl->cnt，并用 *out_ptr 设置为指向第一个 yak_occ_t（注意：返回的内存由 yak_ch_pos_t 管理）
+
+
 static inline uint32_t yak_ch_pos_get(yak_ch_pos_t *p, uint64_t kmer, yak_occ_t **out_ptr)
 {
 	khint_t idx = yak_pos_get(p->h, kmer);
@@ -322,7 +322,7 @@ int yak_ch_insert_list_kmer_record_mapping(yak_ch_t *h, int create_new, int n, c
 
 // 	return n_ins;
 // }
-extern std::string decode_kmer(uint64_t x, int k); // 声明decode_kmer
+extern std::string decode_kmer(uint64_t x, int k);
 
 // int yak_hash_put(yak_ch_t *h)
 // {
@@ -330,7 +330,7 @@ extern std::string decode_kmer(uint64_t x, int k); // 声明decode_kmer
 // 	for (khint_t i = 0; i < kh_end(h); i++)
 // 	{
 // 		if (kh_exist(h, i))
-// 		{ // 检查该 bucket 是否有效
+
 // 			printf("bucket[%u] key = 0x%lx\n", i, kh_key(h, i));
 // 		}
 // 	}
@@ -368,7 +368,7 @@ int yak_ch_insert_list_kmer_full(yak_ch_t *h, yak_ch_t *h_pos,
 
 			if (ins)
 			{
-				// 插入 kmer 本体 + r[j] + forward mask
+
 				k = yak_ht_put(g->h, x << YAK_COUNTER_BITS, &absent);
 				if (absent)
 				{
@@ -390,25 +390,25 @@ int yak_ch_insert_list_kmer_full(yak_ch_t *h, yak_ch_t *h_pos,
 					// 	uint16_t utg = get_k & YAK_KEY_MASK;
 					// 	// std::cout << "utg=" << utg << std::endl;
 					// }
-					// kmer 本体 (高位去掉计数位)
+
 					uint64_t kmer = key_h >> YAK_COUNTER_BITS;
 					std::string kmer_str_in_h = decode_kmer(kmer, k);
 					// printf("raw_key=%lu, kmer_code=%lu, kmer=%s\n",
 					// 	   key_h, kmer, kmer_str_in_h.c_str());
-					// read id（在低位的 KEY_MASK 范围里）
+
 					uint64_t read_id = key_h & YAK_KEY_MASK;
 
-					// 是否 forward
+
 					bool is_forward = key_h & YAK_FORWARD_MASK;
 
-					// 是否重复
+
 					bool is_repeat = key_h & YAK_REPEAT_MASK;
 					std::string kmer_str = decode_kmer(a[j], h->k);
 					// std::cout << a[j] << std::endl;
 					// printf("pos=%u, readID=%lu, forward=%d, repeat=%d\n",
 					// pos[j], read_id, is_forward, is_repeat);
 					//...
-					//  插入位置信息
+
 					int absent1;
 					k_pos = yak_ht_put(g_pos->h, x2 << 30, &absent1);
 					// std::cout << absent1 << std::endl;
@@ -491,7 +491,7 @@ int yak_ch_insert_list_kmer_full_for_polishing_target(yak_ch_t *h, yak_ch_t *h_p
 
 			if (ins)
 			{
-				// 插入 kmer 本体 + r[j] + forward mask
+
 				k = yak_ht_put(g->h, x << YAK_COUNTER_BITS, &absent);
 				if (absent)
 				{
@@ -560,7 +560,7 @@ int yak_ch_insert_list_kmer_full_for_polishing(yak_ch_t *h, yak_ch_t *h_pos,
 
 			if (ins)
 			{
-				// 插入 kmer 本体 + r[j] + forward mask
+
 				k = yak_ht_put(g->h, x << YAK_COUNTER_BITS, &absent);
 				if (absent)
 				{
@@ -583,25 +583,25 @@ int yak_ch_insert_list_kmer_full_for_polishing(yak_ch_t *h, yak_ch_t *h_pos,
 						// std::cout << "utg=" << utg <<" a[j]: "<< a[j]<< std::endl;
 						//  std::cout << a[j] << std::endl;
 					}
-					// kmer 本体 (高位去掉计数位)
+
 					uint64_t kmer = key_h >> YAK_COUNTER_BITS;
 					std::string kmer_str_in_h = decode_kmer(kmer, k);
 					// printf("raw_key=%lu, kmer_code=%lu, kmer=%s\n",
 					// 	   key_h, kmer, kmer_str_in_h.c_str());
-					// read id（在低位的 KEY_MASK 范围里）
+
 					uint64_t read_id = key_h & YAK_KEY_MASK;
 
-					// 是否 forward
+
 					bool is_forward = key_h & YAK_FORWARD_MASK;
 
-					// 是否重复
+
 					bool is_repeat = key_h & YAK_REPEAT_MASK;
 					std::string kmer_str = decode_kmer(a[j], h->k);
 
 					// printf("pos=%u, readID=%lu, forward=%d, repeat=%d\n",
 					// pos[j], read_id, is_forward, is_repeat);
 					//...
-					//  插入位置信息
+
 					int absent1;
 					k_pos = yak_ht_put(g_pos->h, x2 << 30, &absent1);
 					// std::cout << absent1 << std::endl;
@@ -641,12 +641,12 @@ int yak_ch_insert_list_kmer_full_for_polishing(yak_ch_t *h, yak_ch_t *h_pos,
 					bool is_repeat = 1;
 					// std::cout << "is_repeat: " << is_repeat << std::endl;
 
-					// 在并行循环里
+
 					if (is_repeat)
 					{
-						// 保存额外信息到外部 map
+
 						RepeatInfo info;
-						info.read_name = r[j]; // 或 r[j] 如果你用 id
+						info.read_name = r[j];
 						info.pos = pos[j];
 						info.forward = f[j];
 
@@ -696,12 +696,12 @@ int yak_ch_insert_list_kmer_record_mapping2(yak_ch_t *h, yak_ch_t *h_pos, int cr
 					{
 						kh_key(g->h, k) |= YAK_FORWARD_MASK;
 					}
-					// ---- 新增：插入pos到h_pos ----
+
 					yak_ch1_t *g_pos = &h_pos->h[a[0] & ((1 << h_pos->pre) - 1)];
 					int absent_pos;
 					khint_t k_pos = yak_ht_put(g_pos->h, a[j], &absent_pos);
-					kh_key(g_pos->h, k_pos) = (pos[j] & YAK_POS_MASK); // 只存低30位
-																	   // ---- 新增结束 ----
+					kh_key(g_pos->h, k_pos) = (pos[j] & YAK_POS_MASK);
+
 				}
 				else if (((kh_key(g->h, k) & YAK_KEY_MASK) ^ r[j]) != 0)
 				{
@@ -747,10 +747,10 @@ int yak_ch_insert_list_kmer_record_mapping2(yak_ch_t *h, yak_ch_t *h_pos, int cr
 //                 k = yak_ht_put(g->h, (a[j] >> h->pre)<<YAK_COUNTER_BITS, &absent);
 //                 if (absent){
 //                     kh_key(g->h, k)|=r[j];
-//                     // 用完整的k-mer作为key，直接赋值
+
 //                     k = yak_ht_put(g_pos->h, a[j], &absent);
 //                     kh_key(g_pos->h, k) = (pos[j]&YAK_POS_MASK);
-// 					// 输出kmer和pos
+
 //         			printf("insert kmer: 0x%016llx, pos: %u\n", (unsigned long long)a[j], pos[j]);
 //                     ++n_ins;
 //                 }else if(((kh_key(g->h, k)&YAK_KEY_MASK) ^ r[j]) != 0){
@@ -781,14 +781,14 @@ int yak_ch_insert_list_kmer_pos2(yak_ch_t *h, yak_ch_t *h_pos, int create_new, i
 	{
 		uint64_t x = a[j] >> h->pre;
 		khint_t k;
-		// 只处理主表h中已存在的kmer
+
 		if ((a[j] & mask) != (a[0] & mask))
 			continue;
 		k = yak_ht_get(g->h, x << YAK_COUNTER_BITS);
 		if (k == kh_end(g->h))
-			continue; // 主表不存在则跳过
+			continue;
 
-		// 插入或更新h_pos
+
 		int absent;
 		khint_t k_pos = yak_ht_put(g_pos->h, a[j], &absent);
 		kh_key(g_pos->h, k_pos) = (pos[j] & YAK_POS_MASK);
@@ -796,7 +796,7 @@ int yak_ch_insert_list_kmer_pos2(yak_ch_t *h, yak_ch_t *h_pos, int create_new, i
 		std::string kmer_str = decode_kmer(a[j], h->k);
 		// printf("insert h_pos: kmer: %s, pos: %u\n", kmer_str.c_str(), pos[j]);
 		++n_ins;
-		// 输出kmer和pos
+
 		// printf("insert h_pos: 0x%016llx, pos: %u\n", (unsigned long long)a[j], pos[j]);
 		++n_ins;
 	}
@@ -830,7 +830,7 @@ int yak_ch_insert_list_kmer_pos(yak_ch_t *h, yak_ch_t *h_pos, int create_new, in
 				if (absent)
 				{
 					kh_key(g->h, k) |= r[j];
-					// --- 解析 h 中信息 ---
+
 					uint64_t key_h = kh_key(g->h, k);
 					uint64_t kmer_code = key_h >> YAK_COUNTER_BITS;
 					uint64_t read_id = key_h & YAK_KEY_MASK;
@@ -845,7 +845,7 @@ int yak_ch_insert_list_kmer_pos(yak_ch_t *h, yak_ch_t *h_pos, int create_new, in
 					kh_key(g_pos->h, k) |= (pos[j] & YAK_POS_MASK);
 					++n_ins;
 
-					// --- 解析 h_pos 中信息 ---
+
 					uint64_t key_pos = kh_key(g_pos->h, k);
 					uint32_t position = key_pos & YAK_POS_MASK;
 					printf("from h_pos: kmer_high30=0x%08llx, pos=%u\n",
@@ -893,8 +893,8 @@ int yak_ch_insert_list_kmer_pos(yak_ch_t *h, yak_ch_t *h_pos, int create_new, in
 //                     if(f[j]){
 //                         kh_key(g->h, k) |= YAK_FORWARD_MASK;
 //                     }
-//                     // 这里可以处理pos，比如打印、存储到另一个表、或编码到key的高位（需保证不会冲突）
-//                     // 例如：你可以在此处调用一个自定义函数保存pos信息
+
+
 //                     // save_kmer_pos(x, pos[j]);
 //                 }else if(((kh_key(g->h, k)&YAK_KEY_MASK) ^ r[j]) != 0){
 //                     kh_key(g->h,k) |= YAK_REPEAT_MASK;
@@ -958,7 +958,7 @@ void yak_ch_get_pos_test(yak_ch_t *h, yak_ch_t *h_pos, uint64_t x, uint32_t *pos
 	int mask_pos = (1 << 30) - 1;
 	yak_ht_t *g_pos = h_pos->h[x & mask_pos].h;
 
-	khint_t k = yak_ht_get(g_pos, (x >> 30) << 30); // 或者 (x >> h_pos->pre) << h_pos->pre
+	khint_t k = yak_ht_get(g_pos, (x >> 30) << 30);
 	if (k == kh_end(g_pos))
 	{
 
@@ -993,7 +993,7 @@ uint64_t yak_ch_get_pos(const yak_ch_t *h, const yak_ch_t *h_pos, uint64_t x, ui
 	if (k_pos != kh_end(g_pos))
 	{
 		(*pos) = (kh_key(g_pos, k_pos) & YAK_POS_MASK);
-		// printf("Found position: %u\n", *pos); // 正常找到
+
 		// std::cout<<"g_pos->count: "<<g_pos->count<<" g_pos->keys: "<<g_pos->keys<<std::endl;
 	}
 	else
@@ -1034,7 +1034,7 @@ uint64_t yak_ch_get_pos_for_repeat(const yak_ch_t *h, const yak_ch_t *h_pos, uin
 	if (k_pos != kh_end(g_pos))
 	{
 		(*pos) = (kh_key(g_pos, k_pos) & YAK_POS_MASK);
-		// printf("Found position: %u\n", *pos); // 正常找到
+
 		//  std::cout<<"g_pos->count: "<<g_pos->count<<" g_pos->keys: "<<g_pos->keys<<std::endl;
 	}
 	else
@@ -1080,45 +1080,45 @@ int yak_ch__non_repeat_get_k(const yak_ch_t *h, uint64_t x)
 //     int mask = (1 << h->pre) - 1;
 //     int mask_pos = (1 << 30) - 1;
 
-//     // 查找 h 中的 k-mer key
+
 //     yak_ht_t *g = h->h[x & mask].h;
 //     khint_t k = yak_ht_get(g, (x >> h->pre) << YAK_COUNTER_BITS);
 //     if (k == kh_end(g) || (kh_key(g, k) & YAK_REPEAT_MASK) != 0) {
-//         return -1; // k-mer 不存在或者重复
+
 //     }
 
 //     uint64_t key_h = kh_key(g, k);
-//     uint64_t kmer = key_h >> YAK_COUNTER_BITS;      // k-mer 本体
-//     *read_id = key_h & YAK_KEY_MASK;               // read id
-//     *is_forward = key_h & YAK_FORWARD_MASK;        // forward 标志
-//     *is_repeat  = key_h & YAK_REPEAT_MASK;         // repeat 标志
 
-//     // 查找 h_pos 中对应的位置
+//     *read_id = key_h & YAK_KEY_MASK;               // read id
+
+
+
+
 //     yak_ht_t *g_pos = h_pos->h[x & mask_pos].h;
-//     uint64_t kmer_key_high = kmer >> 30 << 30; // 高位匹配 h_pos
+
 //     khint_t k_pos = yak_ht_get(g_pos, kmer_key_high);
 //     if (k_pos != kh_end(g_pos)) {
 //         uint64_t key_pos = kh_key(g_pos, k_pos);
 //         *position = key_pos & YAK_POS_MASK;
 //     } else {
-//         *position = 0; // 如果没找到，返回0
+
 //     }
 
-//     return 0; // 成功
+
 // }
-// 获取 kmer 对应的 read id、forward/repeat 标记，以及位置信息
-// 返回 read id（如果不存在返回 65535），pos 通过指针返回
+
+
 uint16_t yak_ch_get_full_info(const yak_ch_t *h, const yak_ch_t *h_pos, uint64_t x,
 							  bool *is_forward, bool *is_repeat, uint32_t *position)
 {
 	int mask = (1 << h->pre) - 1;
 	int mask_pos = (1 << 30) - 1;
 
-	// 查找 kmer 本体
+
 	yak_ht_t *g = h->h[x & mask].h;
 	khint_t k = yak_ht_get(g, (x >> h->pre) << YAK_COUNTER_BITS);
 	// if (k == kh_end(g) || (kh_key(g, k) & YAK_REPEAT_MASK)) {
-	//     // kmer 不存在或者重复
+
 	//     if (position) *position = 0;
 	//     if (is_forward) *is_forward = false;
 	//     if (is_repeat) *is_repeat = true;
@@ -1132,14 +1132,14 @@ uint16_t yak_ch_get_full_info(const yak_ch_t *h, const yak_ch_t *h_pos, uint64_t
 	if (is_repeat)
 		*is_repeat = key_h & YAK_REPEAT_MASK;
 
-	// 查找位置信息
+
 	yak_ht_t *g2 = h_pos->h[x & mask_pos].h;
 	yak_ch1_t *g_pos = &h_pos->h[x & mask_pos];
 	khint_t k_pos = yak_ht_get(g_pos->h, (x >> 30) << 30);
 	if (k_pos != kh_end(g_pos->h) && position)
 	{
 		*position = kh_key(g_pos->h, k_pos) & YAK_POS_MASK;
-		// printf("Found position: %u\n", *position); // 正常找到
+
 	}
 	// else if (position)
 	// {

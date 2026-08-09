@@ -11,9 +11,9 @@
 
 struct RepeatInfo
 {
-	uint64_t read_name; // 或 uint16_t read id
-	uint32_t pos;		// 位置
-	bool forward;		// 方向
+	uint64_t read_name;
+	uint32_t pos;
+	bool forward;
 };
 
 extern std::unordered_map<uint64_t, std::vector<RepeatInfo>> repeated_kmers_map;
@@ -33,7 +33,7 @@ extern std::unordered_map<uint64_t, std::vector<RepeatInfo>> repeated_kmers_map;
 #define YAK_FORWARD_MASK (1 << (YAK_COUNTER_BITS - 2))
 #define YAK_KEY_MASK ((1 << YAK_COUNTER_BITS) - 1 - YAK_REPEAT_MASK - YAK_FORWARD_MASK)
 #define YAK_POS_MASK ((1 << 30) - 1)
-// #define YAK_POS_MASK  ((1ULL<<30) - 1ULL)               // 低 30 位
+
 #define YAK_BLK_SHIFT 9 // 64 bytes, the size of a cache line
 #define YAK_BLK_MASK ((1 << (YAK_BLK_SHIFT)) - 1)
 

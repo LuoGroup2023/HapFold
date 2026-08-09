@@ -17,7 +17,7 @@ typedef struct {
 } ketopt_t;
 
 typedef struct {
-	char *name;
+	const char *name;
 	int has_arg;
 	int val;
 } ko_longopt_t;
@@ -76,12 +76,11 @@ static int ketopt(ketopt_t *s, int argc, char *argv[], int permute, const char *
 			int k, n_exact = 0, n_partial = 0;
 			const ko_longopt_t *o = 0, *o_exact = 0, *o_partial = 0;
 			for (j = 2; argv[s->i][j] != '\0' && argv[s->i][j] != '='; ++j) {} /* find the end of the option name */
-			for (k = 0; longopts[k].name != 0; ++k) {
+			for (k = 0; longopts[k].name != 0; ++k)
 				if (strncmp(&argv[s->i][2], longopts[k].name, j - 2) == 0) {
 					if (longopts[k].name[j - 2] == 0) ++n_exact, o_exact = &longopts[k];
 					else ++n_partial, o_partial = &longopts[k];
 				}
-			}
 			if (n_exact > 1 || (n_exact == 0 && n_partial > 1)) return '?';
 			o = n_exact == 1? o_exact : n_partial == 1? o_partial : 0;
 			if (o) {
@@ -94,7 +93,7 @@ static int ketopt(ketopt_t *s, int argc, char *argv[], int permute, const char *
 			}
 		}
 	} else { /* a short option */
-		char *p;
+		const char *p;
 		if (s->pos == 0) s->pos = 1;
 		opt = s->opt = argv[s->i][s->pos++];
 		p = strchr((char*)ostr, opt);

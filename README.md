@@ -1,5 +1,7 @@
 # HapFold: Efficient and Accurate T2T-level Haplotype Reconstruction
 
+Current source version: **1.0**
+
 [![BioConda Downloads](https://img.shields.io/conda/dn/bioconda/hapfold?label=bioconda%20downloads)](https://anaconda.org/bioconda/hapfold)
 [![BioConda Version](https://img.shields.io/conda/vn/bioconda/hapfold?label=bioconda)](https://anaconda.org/bioconda/hapfold)
 [![License](https://img.shields.io/github/license/LuoGroup2023/HapFold)](https://github.com/LuoGroup2023/HapFold/blob/main/LICENSE)
@@ -50,6 +52,8 @@ cd HapFold
 
 # Compile the source code
 make -j8
+./HapFold version
+./HapFold --help
 ```
 
 ## 🚀 Quick Start & Workflow
@@ -74,10 +78,54 @@ The final scaffolding quality is strongly influenced by the quality of the input
 Usage: HapFold <command> <arguments> <inputs>
 
 Commands:
+  run                    run hifiasm, mapping, and scaffolding in sequence
+  hifiasm                run the embedded hifiasm assembler
   scaffolding            use Hi-C/Pore-C data to resolve haplotypes
   mapping                map Hi-C/Pore-C data to sequences in the graph
   version                print version number
 ```
+
+### Complete workflow (`run`)
+
+`run` executes hifiasm, extracts the unitig FASTA from the resulting GFA,
+runs mapping, and finally runs scaffolding. Options before `--` belong to
+the whole pipeline. Hifiasm-specific options and assembly reads follow `--`:
+
+```bash
+HapFold run \
+  -1 hic.R1.fastq.gz \
+  -2 hic.R2.fastq.gz \
+  -n 46 \
+  -t 32 \
+  -o result/asm \
+  --hifiasm-mode hic \
+  --high-quality-utg \
+  -- \
+  hifi_reads.fastq.gz
+```
+
+The shared `-t 32` is used by hifiasm, mapping, and scaffolding. The shared
+`-o result/asm` derives the HapFold output directory as
+`result/asm.hapfold`.
+
+`--hifiasm-mode` accepts `default`, `trio`, or `hic` and defaults to `hic`.
+In `hic` mode, the `-1/-2` reads are passed both to hifiasm's Hi-C
+partitioning stage and to HapFold mapping. In `trio` mode, provide
+`--hifiasm-hap1-yak` and `--hifiasm-hap2-yak`. Output discovery is
+mode-specific: HapFold uses `.bp.*` for `default`, `.dip.*` for `trio`,
+and `.hic.*` for `hic`, so stale files from another mode cannot be selected.
+
+By default, raw hifiasm GFA files and intermediate `p_utg.fa` are placed in
+`result/asm.hapfold/.hapfold-work`. The correction/overlap restart caches
+are not written, and the managed work directory is removed only after the
+whole pipeline succeeds. It is retained after a failure for diagnosis.
+Use `--keep-hifiasm-output` to write hifiasm files at `result/asm.*` and
+retain the restart caches. The temporary `p_utg.fa` is still removed after
+a successful run.
+
+Exact paths can still be supplied with `--utg-gfa`, `--hap1-gfa`, and
+`--hap2-gfa` before `--`; externally supplied files are never removed. Run
+`HapFold run -h -- dummy` to see all pipeline options.
 
 ### Step 0: Pore-C Preprocessing (Optional)
 
@@ -87,7 +135,7 @@ We recommend using the official EPI2ME Pore-C pipeline (`pore-c-py`) for this co
 
 https://github.com/epi2me-labs/pore-c-py
 
-After obtaining the converted results, HapFold provides a C++ utility in the `scripts/` directory to split them into paired files suitable for HapFold mapping.
+Convert Pore-C contacts into paired FASTQ inputs before running HapFold mapping.
 
 Alternatively, Falign can be used to generate Hi-C-like contacts directly from Pore-C data:
 
@@ -140,23 +188,6 @@ Usage: HapFold scaffolding [options] <mapping.txt> <assembly.gfa> <output_dir> -
 | `--hic_scaffold_threshold_ratio FLOAT` | Threshold ratio for sequence-based Hi-C scaffolding extensions [0.60]. |
 | `-t INT`                               | Number of threads [8].                                       |
 
-### Demo with rice test data
-
-A small rice test dataset is provided in the package to test the scaffolding step of HapFold. The demo data include three GFA files generated from the initial assembly and a precomputed `mapping.txt` file.
-
-```bash
-cd rice-test-data
-
-HapFold scaffolding \
-  -t 32 \
-  -n 24 \
-  mapping.txt \
-  p_utg.gfa \
-  rice_hapfold_out \
-  -1 hap1.p_ctg.gfa \
-  -2 hap2.p_ctg.gfa
-```
-
 The expected output files include:
 
 ```text
@@ -171,11 +202,6 @@ cd rice_hapfold_out
 cat hap_contig.fa scaffold.fa > all_scaffold.fa
 ```
 
-**Expected demo run time:** the rice test demo is expected to finish within several minutes on a standard Linux workstation or server using 32 CPU threads.
-
-
-
-
 ## Expected Outputs & Key Notes
 
 After successfully running the `scaffolding` command, HapFold generates several crucial sequence files in your specified `<output_dir>`.
@@ -187,6 +213,11 @@ To obtain the **complete** genome assembly, you **MUST combine both the unresolv
 HapFold splits the output based on graph topologies (Single Chains vs. Bubble Chains):
 1. **`hap_contig.fa` (Single Chains)**: Contains sequences derived from unresolved single chains in the graph. This typically includes **sex chromosomes (X/Y or Z/W)** and ultra-conserved homozygous blocks where haplotypes cannot be topologically or proximally differentiated.
 2. **`scaffold.fa` (or `phasing_hap1.fa` / `phasing_hap2.fa`) (Bubble Chains)**: Contains chromosome-scale scaffolds resolved from bubble chains, representing the successfully phased autosomal diploid regions.
+
+Final FASTA identifiers are deterministic and independent of inferred chromosome
+labels: `scaffold.fa` uses `scaffold01`, `scaffold02`, ... and
+`hap_contig.fa` uses `contig01`, `contig02`, ... . Original graph identifiers
+remain available in auxiliary composition and path reports.
 
 #### Assembly Completeness Formula
 
