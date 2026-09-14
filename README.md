@@ -74,10 +74,54 @@ The final scaffolding quality is strongly influenced by the quality of the input
 Usage: HapFold <command> <arguments> <inputs>
 
 Commands:
+  run                    run hifiasm, mapping, and scaffolding in sequence
+  hifiasm                run the embedded hifiasm assembler
   scaffolding            use Hi-C/Pore-C data to resolve haplotypes
   mapping                map Hi-C/Pore-C data to sequences in the graph
   version                print version number
 ```
+
+### Complete workflow (`run`)
+
+`run` executes hifiasm, extracts the unitig FASTA from the resulting GFA,
+runs mapping, and finally runs scaffolding. Options before `--` belong to
+the whole pipeline. Hifiasm-specific options and assembly reads follow `--`:
+
+```bash
+HapFold run \
+  -1 hic.R1.fastq.gz \
+  -2 hic.R2.fastq.gz \
+  -n 46 \
+  -t 32 \
+  -o result/asm \
+  --hifiasm-mode hic \
+  --high-quality-utg \
+  -- \
+  hifi_reads.fastq.gz
+```
+
+The shared `-t 32` is used by hifiasm, mapping, and scaffolding. The shared
+`-o result/asm` derives the HapFold output directory as
+`result/asm.hapfold`.
+
+`--hifiasm-mode` accepts `default`, `trio`, or `hic` and defaults to `hic`.
+In `hic` mode, the `-1/-2` reads are passed both to hifiasm's Hi-C
+partitioning stage and to HapFold mapping. In `trio` mode, provide
+`--hifiasm-hap1-yak` and `--hifiasm-hap2-yak`. Output discovery is
+mode-specific: HapFold uses `.bp.*` for `default`, `.dip.*` for `trio`,
+and `.hic.*` for `hic`, so stale files from another mode cannot be selected.
+
+By default, raw hifiasm GFA files and intermediate `p_utg.fa` are placed in
+`result/asm.hapfold/.hapfold-work`. The correction/overlap restart caches
+are not written, and the managed work directory is removed only after the
+whole pipeline succeeds. It is retained after a failure for diagnosis.
+Use `--keep-hifiasm-output` to write hifiasm files at `result/asm.*` and
+retain the restart caches. The temporary `p_utg.fa` is still removed after
+a successful run.
+
+Exact paths can still be supplied with `--utg-gfa`, `--hap1-gfa`, and
+`--hap2-gfa` before `--`; externally supplied files are never removed. Run
+`HapFold run -h -- dummy` to see all pipeline options.
 
 ### Step 0: Pore-C Preprocessing (Optional)
 

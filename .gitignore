@@ -1,0 +1,9 @@
+/build/
+/HapFold
+/HapFold-*
+*.o
+*.d
+*.so
+*.log
+*.time.txt
+nohup.out

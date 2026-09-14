@@ -19,6 +19,10 @@
 #include "math.h"
 // #include <iomanip>
 #include <algorithm> // 你的 std::max 需要
+#include <array>
+#include <cmath>
+#include <limits>
+#include <numeric>
 using namespace std;
 vector<vector<uint32_t>> best_buddy_separate(bool **seen, float **best_buddy, uint32_t **connect_num, uint32_t len);
 vector<vector<uint32_t>> best_buddy_merge(bool **seen, float **best_buddy, uint32_t **connect_num, uint32_t len, uint32_t target, vector<uint32_t> inside_connections, bool check_identity);
@@ -41,6 +45,13 @@ struct GlobalParams {
     uint32_t chain_len_threshold = 12000000;
     uint32_t scaffold_len_threshold = 300000;
     bool debug_mode = false; 
+    string global_scaffolding_mode = "mcl";
+    string paired_global_merge = "supported";
+    double mcl_inflation = 0.0;
+    uint32_t paired_merge_min_links = 100;
+    double paired_merge_min_confidence = 1.5;
+    double component_seed_boost = 1.2;
+    string split_chain_list;
 
 };
 
@@ -11269,6 +11280,160 @@ struct ContigPath
     int hap_id;
     map<uint32_t, uint32_t> node_positions;
 };
+
+static bool split_flagged_chains(
+    std::vector<contig_chains> &chains,
+    const std::unordered_map<std::string, ContigPath> &contig_paths,
+    const GlobalParams &params)
+{
+    if (params.split_chain_list.empty())
+        return true;
+
+    std::ifstream split_in(params.split_chain_list);
+    if (!split_in)
+    {
+        std::cerr << "[SplitChain::ERROR] Cannot open "
+                  << params.split_chain_list << std::endl;
+        return false;
+    }
+
+    std::unordered_set<std::string> split_keys;
+    std::string line;
+    while (std::getline(split_in, line))
+    {
+        const size_t comment = line.find('#');
+        if (comment != std::string::npos)
+            line.erase(comment);
+        std::istringstream fields(line);
+        std::string key;
+        if (fields >> key)
+            split_keys.insert(key);
+    }
+
+    std::vector<contig_chains> revised;
+    revised.reserve(chains.size() + split_keys.size() * 8);
+    std::unordered_map<uint32_t, uint32_t> retained_index;
+    size_t split_chain_count = 0;
+    size_t restored_contig_count = 0;
+
+    for (contig_chains &chain : chains)
+    {
+        const std::string first_name = chain.contig_info_output.empty()
+                                           ? std::string()
+                                           : chain.contig_info_output.front().first;
+        const std::string chain_name = first_name.empty()
+                                           ? std::string()
+                                           : first_name + "_" +
+                                                 std::to_string(chain.contig_info_output.size());
+        bool should_split = !first_name.empty() &&
+                            (split_keys.count(first_name) || split_keys.count(chain_name));
+
+        if (should_split)
+        {
+            for (const auto &component : chain.contig_info_output)
+            {
+                auto path_it = contig_paths.find(component.first);
+                if (path_it == contig_paths.end() || path_it->second.ctg_seq.empty())
+                {
+                    std::cerr << "[SplitChain::WARNING] Missing source sequence for "
+                              << component.first << "; keeping chain " << chain_name
+                              << std::endl;
+                    should_split = false;
+                    break;
+                }
+            }
+        }
+
+        if (!should_split)
+        {
+            retained_index[chain.index] = static_cast<uint32_t>(revised.size());
+            revised.push_back(chain);
+            continue;
+        }
+
+        ++split_chain_count;
+        for (const auto &component : chain.contig_info_output)
+        {
+            const ContigPath &path = contig_paths.at(component.first);
+            contig_chains restored{};
+            restored.beg_node = static_cast<uint32_t>(path.begin);
+            restored.end_node = static_cast<uint32_t>(path.end);
+            restored.group_id = chain.group_id;
+            // Sentinel used by the global MCL stage to preserve this explicit
+            // de-scaffolding decision instead of immediately rejoining it.
+            restored.group_id_new = UINT32_MAX - 1;
+            restored.other_index = UINT32_MAX;
+            restored.is_paired = false;
+            restored.path_length = static_cast<uint32_t>(path.ctg_length);
+            restored.contig_info_output.push_back(component);
+
+            std::string sequence = path.ctg_seq;
+            if (component.second)
+            {
+                restored.utg_path_node = path.utg_nodes;
+                for (size_t k = 0; k < path.utg_nodes.size(); ++k)
+                {
+                    const uint32_t position = k < path.utg_starts.size()
+                                                  ? path.utg_starts[k]
+                                                  : 0;
+                    restored.node_positions[path.utg_nodes[k]] = position;
+                }
+            }
+            else
+            {
+                sequence = reverse_complement(sequence);
+                for (size_t k = 0; k < path.utg_nodes.size(); ++k)
+                {
+                    const size_t reverse_k = path.utg_nodes.size() - 1 - k;
+                    const uint32_t node = path.utg_nodes[reverse_k] ^ 1;
+                    const uint32_t forward_position = reverse_k < path.utg_starts.size()
+                                                          ? path.utg_starts[reverse_k]
+                                                          : 0;
+                    const uint32_t reverse_position =
+                        forward_position < path.ctg_length
+                            ? static_cast<uint32_t>(path.ctg_length - forward_position)
+                            : 0;
+                    restored.utg_path_node.push_back(node);
+                    restored.node_positions[node] = reverse_position;
+                }
+                std::swap(restored.beg_node, restored.end_node);
+                restored.beg_node ^= 1;
+                restored.end_node ^= 1;
+            }
+            restored.haplo_sequences = new std::string(std::move(sequence));
+            revised.push_back(std::move(restored));
+            ++restored_contig_count;
+        }
+        delete chain.haplo_sequences;
+        chain.haplo_sequences = nullptr;
+    }
+
+    for (size_t i = 0; i < revised.size(); ++i)
+    {
+        contig_chains &chain = revised[i];
+        const uint32_t old_partner = chain.other_index;
+        chain.index = static_cast<uint32_t>(i);
+        if (!chain.is_paired)
+            continue;
+        auto partner_it = retained_index.find(old_partner);
+        if (partner_it == retained_index.end())
+        {
+            chain.is_paired = false;
+            chain.other_index = UINT32_MAX;
+        }
+        else
+        {
+            chain.other_index = partner_it->second;
+        }
+    }
+
+    chains.swap(revised);
+    std::cerr << "[SplitChain] Split " << split_chain_count
+              << " flagged chains into " << restored_contig_count
+              << " source contigs; " << chains.size()
+              << " chains remain for global scaffolding." << std::endl;
+    return true;
+}
 struct UtgCtgMapping
 {
     std::string utg_id;
@@ -17453,6 +17618,9 @@ void get_haplotype_path_test_code(
         }
     }
 
+    if (!split_flagged_chains(contig_chain, contig_paths, g_params))
+        return;
+
     std::cout << "\n=== Contig Chain new Information ===" << std::endl;
     std::cout << "Total chains: " << contig_chain.size() << std::endl;
     std::cout << "Processed chains count: " << processed_chain_count << std::endl;
@@ -17770,19 +17938,24 @@ void get_haplotype_path_test_code(
         for (int i = 0; i < contig_chain.size() * 2; i++)
         {
             double ratio_i = 1;
-            if (contig_chain[i >> 1].path_length < 100000000)
+            if (contig_chain[i >> 1].path_length > 0 &&
+                contig_chain[i >> 1].path_length < 100000000)
             {
                 ratio_i = 100000000.0 / ((double)contig_chain[i >> 1].path_length);
             }
             for (int j = 0; j < contig_chain.size() * 2; j++)
             {
                 double ratio_j = 1;
-                if (contig_chain[j >> 1].path_length < 100000000)
+                if (contig_chain[j >> 1].path_length > 0 &&
+                    contig_chain[j >> 1].path_length < 100000000)
                 {
                     ratio_j = 100000000.0 / ((double)contig_chain[j >> 1].path_length);
                 }
 
-                connect_num11[i][j] = (uint32_t)(connect_num11[i][j] * ratio_i * ratio_j);
+                long double scaled = (long double)connect_num11[i][j] * ratio_i * ratio_j;
+                connect_num11[i][j] = scaled >= numeric_limits<uint32_t>::max()
+                                          ? numeric_limits<uint32_t>::max()
+                                          : (uint32_t)scaled;
                 // cerr << contig_chain[i >> 1].group_id_new << " " << contig_chain[j >> 1].group_id_new << " " << connect_num11[i][j] << " " << ratio_i << " " << ratio_j << endl;
             }
         }
@@ -18649,6 +18822,431 @@ void get_haplotype_path_test_code(
 
     // 关闭文件
     outFileFiltered.close();
+}
+
+struct MclDsu
+{
+    vector<size_t> parent;
+    explicit MclDsu(size_t n) : parent(n) { iota(parent.begin(), parent.end(), 0); }
+    size_t find(size_t x) { return parent[x] == x ? x : parent[x] = find(parent[x]); }
+    bool join(size_t a, size_t b)
+    {
+        a = find(a); b = find(b);
+        if (a == b) return false;
+        parent[b] = a;
+        return true;
+    }
+};
+
+struct MclScaffoldEdge
+{
+    size_t a, b;
+    int a_end, b_end;
+    uint32_t links;
+    double confidence;
+};
+
+static string mcl_chain_name(const contig_chains &chain)
+{
+    if (!chain.contig_info_output.empty())
+        return chain.contig_info_output.front().first;
+    return string("chain_") + to_string(chain.index);
+}
+
+static vector<vector<double>> run_dense_mcl(const vector<vector<double>> &input,
+                                            double inflation)
+{
+    const size_t n = input.size();
+    vector<vector<double>> matrix = input;
+    if (n == 0) return matrix;
+
+    for (size_t col = 0; col < n; ++col)
+    {
+        double sum = 0.0;
+        for (size_t row = 0; row < n; ++row) sum += matrix[row][col];
+        if (sum <= 0.0) matrix[col][col] = sum = 1.0;
+        for (size_t row = 0; row < n; ++row) matrix[row][col] /= sum;
+    }
+
+    for (int iteration = 0; iteration < 100; ++iteration)
+    {
+        vector<vector<double>> expanded(n, vector<double>(n, 0.0));
+        for (size_t i = 0; i < n; ++i)
+            for (size_t k = 0; k < n; ++k)
+                if (matrix[i][k] > 1e-12)
+                    for (size_t j = 0; j < n; ++j)
+                        if (matrix[k][j] > 1e-12)
+                            expanded[i][j] += matrix[i][k] * matrix[k][j];
+
+        double max_delta = 0.0;
+        for (size_t col = 0; col < n; ++col)
+        {
+            double sum = 0.0;
+            for (size_t row = 0; row < n; ++row)
+            {
+                double value = pow(expanded[row][col], inflation);
+                if (value < 1e-10) value = 0.0;
+                expanded[row][col] = value;
+                sum += value;
+            }
+            if (sum <= 0.0) expanded[col][col] = sum = 1.0;
+            for (size_t row = 0; row < n; ++row)
+            {
+                expanded[row][col] /= sum;
+                max_delta = max(max_delta, fabs(expanded[row][col] - matrix[row][col]));
+            }
+        }
+        matrix.swap(expanded);
+        if (max_delta < 1e-6) break;
+    }
+    return matrix;
+}
+
+static vector<int> extract_mcl_clusters(const vector<vector<double>> &matrix)
+{
+    const size_t n = matrix.size();
+    MclDsu dsu(n);
+    for (size_t col = 0; col < n; ++col)
+    {
+        size_t attractor = col;
+        double best = -1.0;
+        for (size_t row = 0; row < n; ++row)
+            if (matrix[row][col] > best)
+                best = matrix[row][col], attractor = row;
+        dsu.join(col, attractor);
+    }
+    map<size_t, int> root_to_cluster;
+    vector<int> result(n, -1);
+    for (size_t i = 0; i < n; ++i)
+    {
+        size_t root = dsu.find(i);
+        if (!root_to_cluster.count(root))
+            root_to_cluster[root] = (int)root_to_cluster.size();
+        result[i] = root_to_cluster[root];
+    }
+    return result;
+}
+
+static int mcl_cluster_count(const vector<int> &clusters)
+{
+    set<int> values(clusters.begin(), clusters.end());
+    return (int)values.size();
+}
+
+static void merge_mcl_clusters_to_target(vector<int> &clusters,
+                                         const vector<vector<double>> &weights,
+                                         int target)
+{
+    while (mcl_cluster_count(clusters) > target)
+    {
+        double best = -1.0;
+        int best_a = -1, best_b = -1;
+        for (size_t i = 0; i < clusters.size(); ++i)
+            for (size_t j = i + 1; j < clusters.size(); ++j)
+                if (clusters[i] != clusters[j] && weights[i][j] > best)
+                    best = weights[i][j], best_a = clusters[i], best_b = clusters[j];
+        if (best_a < 0 || best <= 0.0) break;
+        for (int &cluster : clusters)
+            if (cluster == best_b) cluster = best_a;
+    }
+    map<int, int> compact;
+    for (int &cluster : clusters)
+    {
+        if (!compact.count(cluster)) compact[cluster] = (int)compact.size();
+        cluster = compact[cluster];
+    }
+}
+
+static MclScaffoldEdge best_mcl_edge(size_t a, size_t b, uint32_t **matrix)
+{
+    MclScaffoldEdge result = {a, b, 0, 0, 0, 0.0};
+    uint32_t second = 0;
+    for (int ae = 0; ae < 2; ++ae)
+        for (int be = 0; be < 2; ++be)
+        {
+            uint32_t value = max(matrix[2 * a + ae][2 * b + be],
+                                 matrix[2 * b + be][2 * a + ae]);
+            if (value > result.links)
+            {
+                second = result.links;
+                result.links = value;
+                result.a_end = ae;
+                result.b_end = be;
+            }
+            else if (value > second)
+                second = value;
+        }
+    result.confidence = result.links / (double)max<uint32_t>(1, second);
+    return result;
+}
+
+static bool run_pair_aware_mcl_scaffolding(vector<contig_chains> &chains,
+                                           uint32_t **connect_num11,
+                                           asg_t *graph,
+                                           const string &output_directory,
+                                           const GlobalParams &params,
+                                           ostream &scaffold_fasta)
+{
+    (void)graph;
+    const size_t n = chains.size();
+    if (n == 0)
+    {
+        cerr << "[MCL] No contig chains available for global scaffolding.\n";
+        return true;
+    }
+
+    unordered_map<uint32_t, size_t> id_to_pos;
+    for (size_t i = 0; i < n; ++i)
+    {
+        if (id_to_pos.count(chains[i].index))
+        {
+            cerr << "[MCL::ERROR] Duplicate stable chain id " << chains[i].index << "\n";
+            return false;
+        }
+        id_to_pos[chains[i].index] = i;
+    }
+
+    vector<int> block_of(n, -1);
+    vector<vector<size_t>> block_members;
+    for (size_t i = 0; i < n; ++i)
+    {
+        if (block_of[i] >= 0) continue;
+        int block = (int)block_members.size();
+        block_members.push_back(vector<size_t>(1, i));
+        block_of[i] = block;
+        if (chains[i].is_paired && chains[i].other_index != UINT32_MAX)
+        {
+            auto found = id_to_pos.find(chains[i].other_index);
+            if (found != id_to_pos.end() && found->second != i && block_of[found->second] < 0)
+            {
+                size_t partner = found->second;
+                if (chains[partner].is_paired && chains[partner].other_index == chains[i].index)
+                {
+                    block_of[partner] = block;
+                    block_members.back().push_back(partner);
+                }
+            }
+        }
+    }
+
+    const size_t bcount = block_members.size();
+    vector<vector<double>> weights(bcount, vector<double>(bcount, 0.0));
+    ofstream raw_out(output_directory + "/global_contacts.normalized.abc");
+    for (size_t bi = 0; bi < bcount; ++bi)
+        for (size_t bj = bi + 1; bj < bcount; ++bj)
+        {
+            double weight = 0.0;
+            for (size_t a : block_members[bi])
+                for (size_t b : block_members[bj])
+                {
+                    uint64_t sum = 0;
+                    for (int ae = 0; ae < 2; ++ae)
+                        for (int be = 0; be < 2; ++be)
+                            sum += max(connect_num11[2 * a + ae][2 * b + be],
+                                       connect_num11[2 * b + be][2 * a + ae]);
+                    bool trusted_same_component =
+                        !chains[a].utg_path_node.empty() &&
+                        !chains[b].utg_path_node.empty() &&
+                        chains[a].group_id == chains[b].group_id &&
+                        complex_components.find(chains[a].group_id) == complex_components.end();
+                    weight += (double)sum * (trusted_same_component ? params.component_seed_boost : 1.0);
+                }
+            weights[bi][bj] = weights[bj][bi] = weight;
+            if (weight > 0.0)
+                raw_out << "block_" << bi << "\tblock_" << bj << "\t" << weight << "\n";
+        }
+    raw_out.close();
+
+    vector<vector<double>> mcl_input = weights;
+    for (size_t i = 0; i < bcount; ++i)
+    {
+        double strongest = 1.0;
+        for (size_t j = 0; j < bcount; ++j) strongest = max(strongest, weights[i][j]);
+        mcl_input[i][i] = strongest;
+    }
+
+    vector<double> inflations;
+    if (params.mcl_inflation > 1.0)
+        inflations.push_back(params.mcl_inflation);
+    else
+        inflations = {1.2, 1.4, 1.6, 1.8, 2.0, 2.4, 3.0};
+
+    vector<int> best_clusters;
+    double selected_inflation = inflations.front();
+    int best_distance = numeric_limits<int>::max();
+    ofstream scan_out(output_directory + "/mcl_inflation_scan.tsv");
+    scan_out << "inflation\tclusters\tdistance_to_expected\n";
+    for (double inflation : inflations)
+    {
+        vector<int> candidate = extract_mcl_clusters(run_dense_mcl(mcl_input, inflation));
+        int count = mcl_cluster_count(candidate);
+        int distance = abs(count - params.n_chrs);
+        scan_out << inflation << "\t" << count << "\t" << distance << "\n";
+        if (distance < best_distance)
+        {
+            best_distance = distance;
+            selected_inflation = inflation;
+            best_clusters.swap(candidate);
+        }
+    }
+    scan_out.close();
+    merge_mcl_clusters_to_target(best_clusters, weights, params.n_chrs);
+
+    vector<int> chain_cluster(n, -1);
+    for (size_t block = 0; block < bcount; ++block)
+        for (size_t member : block_members[block])
+            chain_cluster[member] = best_clusters[block];
+
+    ofstream cluster_out(output_directory + "/chromosome_clusters.tsv");
+    cluster_out << "stable_chain_id\tcontig\tcomponent_id\tpair_stable_id\tchromosome_cluster\n";
+    for (size_t i = 0; i < n; ++i)
+        cluster_out << chains[i].index << "\t" << mcl_chain_name(chains[i]) << "\t"
+                    << chains[i].group_id << "\t"
+                    << (chains[i].is_paired ? to_string(chains[i].other_index) : "NA") << "\t"
+                    << chain_cluster[i] << "\n";
+    cluster_out.close();
+
+    vector<MclScaffoldEdge> candidates;
+    for (size_t a = 0; a < n; ++a)
+        for (size_t b = a + 1; b < n; ++b)
+        {
+            if (chains[a].group_id_new == UINT32_MAX - 1 ||
+                chains[b].group_id_new == UINT32_MAX - 1)
+                continue;
+            if (chain_cluster[a] != chain_cluster[b]) continue;
+            if (chains[a].is_paired && chains[a].other_index == chains[b].index) continue;
+            MclScaffoldEdge edge = best_mcl_edge(a, b, connect_num11);
+            if (edge.links >= params.paired_merge_min_links &&
+                edge.confidence >= params.paired_merge_min_confidence)
+                candidates.push_back(edge);
+        }
+    sort(candidates.begin(), candidates.end(), [](const MclScaffoldEdge &x, const MclScaffoldEdge &y)
+         { return x.links > y.links; });
+
+    vector<array<int, 2>> endpoint_edge(n);
+    for (auto &entry : endpoint_edge) entry = {{-1, -1}};
+    vector<MclScaffoldEdge> accepted;
+    MclDsu path_dsu(n);
+    ofstream decisions(output_directory + "/paired_merge_decisions.tsv");
+    decisions << "a\tb\tlinks\tconfidence\tmode\tstatus\n";
+
+    auto can_add = [&](const MclScaffoldEdge &edge) {
+        return edge.a != edge.b &&
+               endpoint_edge[edge.a][edge.a_end] < 0 &&
+               endpoint_edge[edge.b][edge.b_end] < 0 &&
+               path_dsu.find(edge.a) != path_dsu.find(edge.b);
+    };
+    auto add_edge = [&](const MclScaffoldEdge &edge) {
+        int edge_id = (int)accepted.size();
+        accepted.push_back(edge);
+        endpoint_edge[edge.a][edge.a_end] = edge_id;
+        endpoint_edge[edge.b][edge.b_end] = edge_id;
+        path_dsu.join(edge.a, edge.b);
+    };
+
+    for (const MclScaffoldEdge &edge : candidates)
+    {
+        if (!can_add(edge)) continue;
+        bool both_paired = chains[edge.a].is_paired && chains[edge.b].is_paired;
+        if (params.paired_global_merge == "off" || !both_paired)
+        {
+            add_edge(edge);
+            decisions << mcl_chain_name(chains[edge.a]) << "\t" << mcl_chain_name(chains[edge.b])
+                      << "\t" << edge.links << "\t" << edge.confidence << "\t"
+                      << params.paired_global_merge << "\taccepted_single\n";
+            continue;
+        }
+
+        auto pa_it = id_to_pos.find(chains[edge.a].other_index);
+        auto pb_it = id_to_pos.find(chains[edge.b].other_index);
+        if (pa_it == id_to_pos.end() || pb_it == id_to_pos.end())
+            continue;
+        size_t pa = pa_it->second, pb = pb_it->second;
+        if (pa == pb || pa == edge.b || pb == edge.a || chain_cluster[pa] != chain_cluster[pb])
+            continue;
+
+        MclScaffoldEdge partner = best_mcl_edge(pa, pb, connect_num11);
+        bool independently_supported =
+            partner.links >= params.paired_merge_min_links &&
+            partner.confidence >= params.paired_merge_min_confidence;
+        if (params.paired_global_merge == "supported" && !independently_supported)
+        {
+            decisions << mcl_chain_name(chains[edge.a]) << "\t" << mcl_chain_name(chains[edge.b])
+                      << "\t" << edge.links << "\t" << edge.confidence
+                      << "\tsupported\trejected_partner_weak\n";
+            continue;
+        }
+        if (params.paired_global_merge == "inferred" && partner.links == 0)
+        {
+            partner.a_end = edge.a_end;
+            partner.b_end = edge.b_end;
+        }
+        if (!can_add(partner) || path_dsu.find(edge.a) == path_dsu.find(partner.a) ||
+            path_dsu.find(edge.b) == path_dsu.find(partner.b))
+            continue;
+        add_edge(edge);
+        add_edge(partner);
+        decisions << mcl_chain_name(chains[edge.a]) << "\t" << mcl_chain_name(chains[edge.b])
+                  << "\t" << edge.links << "\t" << edge.confidence << "\t"
+                  << params.paired_global_merge << "\taccepted_coupled\n";
+    }
+    decisions.close();
+
+    vector<bool> emitted(n, false);
+    ofstream path_out(output_directory + "/scaffold_mcl_paths.tsv");
+    path_out << "scaffold\tchromosome_cluster\tstable_chain_id\tcontig\torientation\n";
+    size_t scaffold_id = 0;
+    for (size_t seed = 0; seed < n; ++seed)
+    {
+        if (emitted[seed]) continue;
+        size_t start = seed;
+        for (size_t i = 0; i < n; ++i)
+            if (!emitted[i] && path_dsu.find(i) == path_dsu.find(seed))
+            {
+                int degree = (endpoint_edge[i][0] >= 0) + (endpoint_edge[i][1] >= 0);
+                if (degree <= 1) { start = i; break; }
+            }
+
+        ++scaffold_id;
+        scaffold_fasta << ">MCL_scaffold_" << scaffold_id
+                       << "_chr" << (chain_cluster[start] + 1) << "\n";
+        size_t current = start, previous = n;
+        int entry_end = endpoint_edge[current][0] < 0 ? 0 :
+                        (endpoint_edge[current][1] < 0 ? 1 : (endpoint_edge[current][0] >= 0 ? 1 : 0));
+        bool first = true;
+        while (current < n && !emitted[current])
+        {
+            emitted[current] = true;
+            bool forward = (entry_end == 0);
+            string sequence = chains[current].haplo_sequences ? *chains[current].haplo_sequences : string();
+            if (!forward) sequence = reverse_complement_seq(sequence);
+            if (!first) scaffold_fasta << string(100, 'N');
+            scaffold_fasta << sequence;
+            path_out << scaffold_id << "\t" << chain_cluster[current] << "\t"
+                     << chains[current].index << "\t" << mcl_chain_name(chains[current])
+                     << "\t" << (forward ? "+" : "-") << "\n";
+            first = false;
+
+            int exit_end = entry_end ^ 1;
+            int edge_id = endpoint_edge[current][exit_end];
+            if (edge_id < 0) break;
+            const MclScaffoldEdge &edge = accepted[edge_id];
+            size_t next = edge.a == current ? edge.b : edge.a;
+            int next_entry = edge.a == current ? edge.b_end : edge.a_end;
+            if (next == previous || emitted[next]) break;
+            previous = current;
+            current = next;
+            entry_end = next_entry;
+        }
+        scaffold_fasta << "\n";
+    }
+    path_out.close();
+
+    cerr << "[MCL] Selected inflation " << selected_inflation
+         << "; blocks=" << bcount
+         << "; chromosome clusters=" << mcl_cluster_count(best_clusters)
+         << "; accepted scaffold edges=" << accepted.size() << "\n";
+    return true;
 }
 
 void get_haplotype_path_now(
@@ -19718,6 +20316,9 @@ void get_haplotype_path_now(
         }
     }
 
+    if (!split_flagged_chains(contig_chain, contig_paths, g_params))
+        return;
+
     std::cout << "\n=== Contig Chain new Information ===" << std::endl;
     std::cout << "Total chains: " << contig_chain.size() << std::endl;
     std::cout << "Processed chains count: " << processed_chain_count << std::endl;
@@ -20023,23 +20624,49 @@ void get_haplotype_path_now(
         for (int i = 0; i < contig_chain.size() * 2; i++)
         {
             double ratio_i = 1;
-            if (contig_chain[i >> 1].path_length < 100000000)
+            if (contig_chain[i >> 1].path_length > 0 &&
+                contig_chain[i >> 1].path_length < 100000000)
             {
                 ratio_i = 100000000.0 / ((double)contig_chain[i >> 1].path_length);
             }
             for (int j = 0; j < contig_chain.size() * 2; j++)
             {
                 double ratio_j = 1;
-                if (contig_chain[j >> 1].path_length < 100000000)
+                if (contig_chain[j >> 1].path_length > 0 &&
+                    contig_chain[j >> 1].path_length < 100000000)
                 {
                     ratio_j = 100000000.0 / ((double)contig_chain[j >> 1].path_length);
                 }
 
-                connect_num11[i][j] = (uint32_t)(connect_num11[i][j] * ratio_i * ratio_j);
+                long double scaled = (long double)connect_num11[i][j] * ratio_i * ratio_j;
+                connect_num11[i][j] = scaled >= numeric_limits<uint32_t>::max()
+                                          ? numeric_limits<uint32_t>::max()
+                                          : (uint32_t)scaled;
                 // cerr << contig_chain[i >> 1].group_id_new << " " << contig_chain[j >> 1].group_id_new << " " << connect_num11[i][j] << " " << ratio_i << " " << ratio_j << endl;
             }
         }
     // }
+
+    if (g_params.global_scaffolding_mode == "mcl")
+    {
+        cerr << "[MCL] Starting pair-aware chromosome clustering and global scaffolding.\n";
+        bool ok = run_pair_aware_mcl_scaffolding(contig_chain, connect_num11, graph,
+                                                 string(output_directory), g_params,
+                                                 outFileFiltered2);
+        if (outUnvisitedTxt.is_open())
+        {
+            outUnvisitedTxt << "\nTotal Unvisited Count: " << unvisited_total_count
+                            << ", Total Length: " << total_unvisited_len << "\n";
+            outUnvisitedTxt.close();
+        }
+        outFileFiltered2.close();
+        for (size_t row = 0; row < contig_chain.size() * 2; ++row)
+            free(connect_num11[row]);
+        free(connect_num11);
+        if (!ok)
+            cerr << "[MCL::ERROR] Global scaffolding failed; use --global-scaffolding legacy to run the old method.\n";
+        return;
+    }
    
     cerr << "output scaffold map" << endl;
     // ofstream outFileScaffoldSimple;

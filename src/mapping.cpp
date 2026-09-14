@@ -3464,7 +3464,6 @@ int main_polishing(int argc, char *argv[])
 		fprintf(stderr, "  -b INT     set Bloom filter size to 2**INT bits; 0 to disable [%d]\n", opt.bf_shift);
 		fprintf(stderr, "  -t INT     number of worker threads [%d]\n", opt.n_thread);
 		fprintf(stderr, "  -K INT     chunk size [100m]\n");
-		fprintf(stderr, "  -m INT     use haphic\n");
 		fprintf(stderr, "  -o FILE    save mapping relationship to FILE []\n");
 		fprintf(stderr, "Note: -b37 is recommended for human reads\n");
 		return 1;
@@ -3558,7 +3557,6 @@ int main_polishing_test(int argc, char *argv[])
 		fprintf(stderr, "  -b INT     set Bloom filter size to 2**INT bits; 0 to disable [%d]\n", opt.bf_shift);
 		fprintf(stderr, "  -t INT     number of worker threads [%d]\n", opt.n_thread);
 		fprintf(stderr, "  -K INT     chunk size [100m]\n");
-		fprintf(stderr, "  -m INT     use haphic\n");
 		fprintf(stderr, "  -o FILE    save mapping relationship to FILE []\n");
 		fprintf(stderr, "Note: -b37 is recommended for human reads\n");
 		return 1;
@@ -3707,4 +3705,3 @@ int main_poreC_map_test(int argc, char *argv[])
     free(h);
     return 0;
 }
-
