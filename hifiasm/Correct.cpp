@@ -5733,7 +5733,7 @@ long long new_start, long long new_length)
                 y_i++;
             }
         }
-        else if (operation == INSERTION)
+        else if (operation == INSERTION)///2是x缺字符（y多字符）
         {
             add_cigar_record(y_string+y_i, operationLen, result_cigar, INSERTION);
             y_i += operationLen;

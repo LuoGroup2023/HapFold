@@ -82,10 +82,6 @@ static ko_longopt_t long_options[] = {
     { "rl-cut",     ko_required_argument, 364},
     { "sc-cut",     ko_required_argument, 365},
     { "no-write-cache", ko_no_argument, 366},
-    { "hybrid-hic-mapping", ko_no_argument, 367},
-    { "hybrid-min-unique-anchors", ko_required_argument, 368},
-    { "hybrid-unique-weight", ko_required_argument, 369},
-    { "hybrid-unique-bonus-cap", ko_required_argument, 370},
     // { "path-round",     ko_required_argument, 348},
 	{ 0, 0, 0 }
 };
@@ -219,11 +215,6 @@ void Print_H(hifiasm_opt_t* asm_opt)
     fprintf(stderr, "    --dual-scaf  output scaffolding\n");
     fprintf(stderr, "    --scaf-gap   INT\n");
     fprintf(stderr, "                 max gap size for scaffolding [%ld]\n", asm_opt->self_scaf_gap_max);
-    fprintf(stderr, "    --hybrid-hic-mapping\n");
-    fprintf(stderr, "                 add independent unique-kmer support to hifiasm chain scoring\n");
-    fprintf(stderr, "    --hybrid-min-unique-anchors INT [%d]\n", asm_opt->hybrid_min_unique_anchors);
-    fprintf(stderr, "    --hybrid-unique-weight FLOAT [%.2f]\n", asm_opt->hybrid_unique_weight);
-    fprintf(stderr, "    --hybrid-unique-bonus-cap FLOAT [%.2f]\n", asm_opt->hybrid_unique_bonus_cap);
 
     fprintf(stderr, "  Telomere-identification:\n");
     fprintf(stderr, "    --telo-m     STR\n");
@@ -270,10 +261,6 @@ void init_opt(hifiasm_opt_t* asm_opt)
     asm_opt->thread_num = 1;
     asm_opt->k_mer_length = 51;
     asm_opt->hic_mer_length = 31;
-    asm_opt->hybrid_hic_mapping = 0;
-    asm_opt->hybrid_min_unique_anchors = 1;
-    asm_opt->hybrid_unique_weight = 0.50;
-    asm_opt->hybrid_unique_bonus_cap = 0.25;
     asm_opt->ul_mer_length = 19;
     asm_opt->trans_mer_length = 31;
 	asm_opt->mz_win = 51;
@@ -1021,14 +1008,6 @@ int CommandLine_process(int argc, char *argv[], hifiasm_opt_t* asm_opt)
             asm_opt->sc_cut = atol(opt.arg);
         } else if (c == 366) {
             asm_opt->write_index_to_disk = 0;
-        } else if (c == 367) {
-            asm_opt->hybrid_hic_mapping = 1;
-        } else if (c == 368) {
-            asm_opt->hybrid_min_unique_anchors = atoi(opt.arg);
-        } else if (c == 369) {
-            asm_opt->hybrid_unique_weight = atof(opt.arg);
-        } else if (c == 370) {
-            asm_opt->hybrid_unique_bonus_cap = atof(opt.arg);
         } else if (c == 'l') {   ///0: disable purge_dup; 1: purge containment; 2: purge overlap
             asm_opt->purge_level_primary = asm_opt->purge_level_trio = atoi(opt.arg);
         }

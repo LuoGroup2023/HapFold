@@ -75,8 +75,8 @@ CC            := gcc
 AR            := ar
 
 #
-# Preserve HapFold's existing use of g++ for .c files to avoid changing
-# established C/C++ linkage behavior.
+# 暂时保留 HapFold 当前使用 g++ 编译 .c 文件的行为，
+# 避免改变已有 C/C++ linkage。
 #
 HF_CC         := $(CXX)
 
@@ -85,8 +85,8 @@ HF_CC         := $(CXX)
 # Compile flags
 # ============================================================
 
-HF_CXXFLAGS   := -O3 -std=c++17 -fpermissive -Wall
-HA_CXXFLAGS   := -g -O3 -std=c++17 -msse4.2 -mpopcnt \
+HF_CXXFLAGS   := -g -gdwarf-3 -fpermissive -Wall -O0
+HA_CXXFLAGS   := -g -O3 -msse4.2 -mpopcnt \
                  -fomit-frame-pointer -Wall -fPIC -fvisibility=hidden
 
 DEPFLAGS      := -MMD -MP
@@ -152,9 +152,8 @@ HA_ALL_NAMES := \
 	gchain_map.o
 
 #
-# Hifiasm uses its complete native implementations. Same-named source files
-# are not assumed to be ABI-compatible, so a hidden-symbol shared library
-# isolates hifiasm globals from HapFold globals.
+# hifiasm 必须使用它自己的完整实现。同名文件不代表 ABI 兼容；
+# 通过隐藏符号的共享库将它与 HapFold 的同名全局符号隔离。
 #
 HA_OBJS       := $(addprefix $(HA_OBJ_DIR)/,$(HA_ALL_NAMES))
 HA_MAIN_OBJ   := $(HA_OBJ_DIR)/main.o
@@ -167,8 +166,9 @@ HA_SHARED_LIB := $(BUILD_DIR)/libhifiasm_embedded.so
 # ============================================================
 
 #
-# Avoid linking both -lz and lib/libz.a, which can mix zlib versions.
-# To use the system zlib instead, replace the definition below with:
+# 不再同时使用 -lz 和 lib/libz.a，避免重复或版本混用。
+#
+# 如果本地 libz.a 有问题，可改为：
 #
 # LIBS := $(LIB_DIR)/libminimap2.a -lz -lpthread -lm
 #

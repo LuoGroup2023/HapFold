@@ -17,14 +17,12 @@
 #include "modmap.c"
 #include "kthread.h"
 #include "math.h"
-#include <algorithm>
+// #include <iomanip>
+#include <algorithm> // 你的 std::max 需要
 #include <array>
 #include <cmath>
 #include <limits>
 #include <numeric>
-#include <atomic>
-#include <chrono>
-#include <mutex>
 using namespace std;
 vector<vector<uint32_t>> best_buddy_separate(bool **seen, float **best_buddy, uint32_t **connect_num, uint32_t len);
 vector<vector<uint32_t>> best_buddy_merge(bool **seen, float **best_buddy, uint32_t **connect_num, uint32_t len, uint32_t target, vector<uint32_t> inside_connections, bool check_identity);
@@ -42,11 +40,11 @@ struct GlobalParams {
     string utg_ctg_file;
     string hap1_gfa;
     string hap2_gfa;
-    int n_chrs = 0;
-    double hic_scaffold_threshold_ratio = 0.6;
+    int n_chrs = 0; 
+    double hic_scaffold_threshold_ratio = 0.6; 
     uint32_t chain_len_threshold = 12000000;
     uint32_t scaffold_len_threshold = 300000;
-    bool debug_mode = false;
+    bool debug_mode = false; 
     string global_scaffolding_mode = "mcl";
     string paired_global_merge = "supported";
     double mcl_inflation = 0.0;
@@ -54,19 +52,6 @@ struct GlobalParams {
     double paired_merge_min_confidence = 1.5;
     double component_seed_boost = 1.2;
     string split_chain_list;
-    bool allow_split_chain_rejoin = false;
-    string forced_chain_links;
-    bool auto_chain_correction = false;
-    string auto_chain_correction_mode = "conservative";
-    uint32_t auto_chain_min_links = 20;
-    double auto_chain_min_confidence = 0.35;
-    uint32_t auto_chain_min_components = 2;
-    // Diagnostic-only output.  This never overwrites scaffold.fa and must not
-    // be reported as biological T2T assembly evidence.
-    bool synthetic_telomere_ablation = false;
-    string telo_motif = "CCCTAA";
-    uint32_t synthetic_telomere_bp = 2000;
-    uint64_t telo_extra_min_length = 1000000;
 
 };
 
@@ -4352,8 +4337,8 @@ typedef struct
     uint32_t beg_node;
     uint32_t end_node;
     vector<uint32_t> utg_path_node;
-    string *haplo_sequences;
-    map<uint32_t, uint32_t> node_positions;
+    string *haplo_sequences;                // 碱基序列
+    map<uint32_t, uint32_t> node_positions; // 记录的是在整个seq上的位置
     uint32_t index;
     uint32_t group_id;
     uint32_t group_id_new;
@@ -4368,7 +4353,7 @@ typedef struct
     string *contig_name;
     uint32_t len;
     string *haplo_sequences;
-    vector<uint32_t> *current_nodes_haplo;
+    vector<uint32_t> *current_nodes_haplo; // 不含方向的节点
     vector<uint32_t> *current_nodes_haplo_have_ward;
     int *path_len;
     vector<string> *current_contig_names;
@@ -4377,7 +4362,7 @@ typedef struct
     uint32_t **connection_count_forward;
     uint32_t **connection_count_backward;
 
-
+    // ⭐ 新增：记录哪些 path 互为对称路径
     vector<pair<uint32_t, uint32_t>> symmetric_pairs;
 
 } new_count_step;
@@ -4405,8 +4390,8 @@ typedef struct
 typedef struct
 { // data structure for each step in kt_pipeline()
     vector<uint32_t> utg_path_node;
-    string *haplo_sequences;
-    map<uint32_t, uint32_t> node_positions;
+    string *haplo_sequences;                // 碱基序列
+    map<uint32_t, uint32_t> node_positions; // 记录的是在整个seq上的位置
     uint32_t path_length;
     string contig_name;
 } contig_chains_small_contig;
@@ -4420,27 +4405,12 @@ typedef struct
     std::vector<contig_chains> *contig_chains_ptr;
 } count_step_small_contig;
 
-struct sparse_phase_edge_t
-{
-    uint32_t target;
-    int64_t coupling; // >0: same phase; <0: opposite phase
-    uint64_t same_score;
-    uint64_t flip_score;
-};
-
 typedef struct
 { // global data structure for kt_pipeline()
     asg_t *graph;
     map<uint32_t, bubble_t *> *node_bubble_map;
     uint32_t **connections_count;
-    // Directed non-zero entries of connections_count, in ascending target
-    // order.  Keeping both directions preserves the legacy worker's exact
-    // accumulation semantics while avoiding an O(component_size^2) scan.
-    vector<vector<pair<uint32_t, uint32_t>>> *connections_sparse;
-    bool use_sparse_connections;
     map<uint32_t, set<uint32_t>> *node_path_id_map;
-    vector<vector<sparse_phase_edge_t>> *bubble_phase_graph;
-    unordered_map<bubble_t *, uint32_t> *bubble_phase_ids;
 } shared_data;
 
 typedef struct
@@ -4449,153 +4419,10 @@ typedef struct
     vector<uint32_t> *beg_node;
     vector<uint32_t> *end_node;
     vector<set<uint32_t>> *current_nodes;
-    string *haplo_sequences;
+    string *haplo_sequences; // 碱基序列
     vector<uint32_t> *haplo_pathes;
-    map<uint32_t, uint32_t> *node_positions;
-    atomic<uint32_t> *completed_steps;
-    chrono::steady_clock::time_point progress_start;
-    mutex *progress_mutex;
+    map<uint32_t, uint32_t> *node_positions; // 记录的是在整个seq上的位置
 } step_data;
-
-struct sparse_phase_build_data_t
-{
-    const vector<vector<pair<uint32_t, uint32_t>>> *connections;
-    const vector<int32_t> *node_bubble;
-    const vector<int8_t> *node_path;
-    vector<unordered_map<uint64_t, array<uint64_t, 4>>> *local_edges;
-};
-
-static void worker_build_sparse_phase_graph(void *data, long i, int tid)
-{
-    sparse_phase_build_data_t *p = (sparse_phase_build_data_t *)data;
-    const uint32_t u = (uint32_t)i;
-    const int32_t bu = (*p->node_bubble)[u];
-    const int8_t pu = (*p->node_path)[u];
-    if (bu < 0 || pu < 0)
-        return;
-
-    auto &out = (*p->local_edges)[tid];
-    for (const auto &raw_edge : (*p->connections)[u])
-    {
-        const uint32_t v = raw_edge.first;
-        if (u >= v || v >= p->node_bubble->size() || raw_edge.second == 0)
-            continue; // consume each symmetric node edge once
-        const int32_t bv = (*p->node_bubble)[v];
-        const int8_t pv = (*p->node_path)[v];
-        if (bv < 0 || pv < 0 || bu == bv)
-            continue;
-
-        uint32_t b0 = (uint32_t)bu, b1 = (uint32_t)bv;
-        uint8_t p0 = (uint8_t)pu, p1 = (uint8_t)pv;
-        if (b0 > b1)
-        {
-            swap(b0, b1);
-            swap(p0, p1);
-        }
-        const uint64_t key = ((uint64_t)b0 << 32) | b1;
-        auto it = out.find(key);
-        if (it == out.end())
-            it = out.emplace(key, array<uint64_t, 4>{{0, 0, 0, 0}}).first;
-        it->second[(p0 << 1) | p1] += raw_edge.second;
-    }
-}
-
-static vector<vector<sparse_phase_edge_t>> build_sparse_bubble_phase_graph(
-    int n_threads,
-    uint32_t n_nodes,
-    const vector<vector<pair<uint32_t, uint32_t>>> &connections,
-    const map<uint32_t, bubble_t *> &node_bubble_map,
-    const map<uint32_t, set<uint32_t>> &node_path_id_map,
-    const vector<bubble_t *> &bubbles,
-    unordered_map<bubble_t *, uint32_t> &bubble_ids)
-{
-    const auto started = chrono::steady_clock::now();
-    bubble_ids.clear();
-    bubble_ids.reserve(bubbles.size() * 2 + 1);
-    for (uint32_t i = 0; i < bubbles.size(); ++i)
-        bubble_ids[bubbles[i]] = i;
-
-    vector<int32_t> node_bubble(n_nodes, -1);
-    vector<int8_t> node_path(n_nodes, -1);
-    uint64_t informative_nodes = 0, ambiguous_nodes = 0;
-    for (const auto &kv : node_bubble_map)
-    {
-        if (kv.first >= n_nodes || kv.second == nullptr || kv.second->paths_nodes.size() != 2)
-            continue;
-        auto bid = bubble_ids.find(kv.second);
-        auto pit = node_path_id_map.find(kv.first);
-        if (bid == bubble_ids.end() || pit == node_path_id_map.end())
-            continue;
-        if (pit->second.size() != 1 || *pit->second.begin() > 1)
-        {
-            ++ambiguous_nodes; // shared/homozygous nodes are not phase-informative
-            continue;
-        }
-        node_bubble[kv.first] = (int32_t)bid->second;
-        node_path[kv.first] = (int8_t)*pit->second.begin();
-        ++informative_nodes;
-    }
-
-    vector<unordered_map<uint64_t, array<uint64_t, 4>>> local_edges(max(1, n_threads));
-    sparse_phase_build_data_t build;
-    build.connections = &connections;
-    build.node_bubble = &node_bubble;
-    build.node_path = &node_path;
-    build.local_edges = &local_edges;
-    cerr << "[SparsePhase][build] nodes=" << n_nodes
-         << " informative=" << informative_nodes
-         << " ambiguous_skipped=" << ambiguous_nodes
-         << " threads=" << n_threads << endl;
-    kt_for(max(1, n_threads), worker_build_sparse_phase_graph, &build, n_nodes);
-
-    size_t local_pairs = 0;
-    for (const auto &m : local_edges)
-        local_pairs += m.size();
-    unordered_map<uint64_t, array<uint64_t, 4>> merged;
-    merged.reserve(local_pairs + 1);
-    for (auto &m : local_edges)
-    {
-        for (const auto &kv : m)
-        {
-            auto it = merged.find(kv.first);
-            if (it == merged.end())
-                merged.emplace(kv.first, kv.second);
-            else
-                for (int z = 0; z < 4; ++z)
-                    it->second[z] += kv.second[z];
-        }
-        unordered_map<uint64_t, array<uint64_t, 4>>().swap(m);
-    }
-
-    vector<vector<sparse_phase_edge_t>> result(bubbles.size());
-    for (const auto &kv : merged)
-    {
-        const uint32_t a = (uint32_t)(kv.first >> 32);
-        const uint32_t b = (uint32_t)kv.first;
-        const uint64_t same = kv.second[0] + kv.second[3];
-        const uint64_t flip = kv.second[1] + kv.second[2];
-        if (same == flip)
-            continue;
-        const long double delta = (long double)same - (long double)flip;
-        const int64_t coupling = delta > (long double)numeric_limits<int64_t>::max()
-                                     ? numeric_limits<int64_t>::max()
-                                 : delta < -(long double)numeric_limits<int64_t>::max()
-                                     ? -numeric_limits<int64_t>::max()
-                                     : (int64_t)delta;
-        result[a].push_back({b, coupling, same, flip});
-        result[b].push_back({a, coupling, same, flip});
-    }
-    for (auto &adj : result)
-        sort(adj.begin(), adj.end(), [](const sparse_phase_edge_t &x, const sparse_phase_edge_t &y) {
-            return x.target < y.target;
-        });
-    const double seconds = chrono::duration<double>(chrono::steady_clock::now() - started).count();
-    cerr << "[SparsePhase][build] thread_local_pairs=" << local_pairs
-         << " unique_pairs=" << merged.size()
-         << " informative_phase_edges=" << [&]() { size_t n = 0; for (const auto &a : result) n += a.size(); return n / 2; }()
-         << " elapsed=" << seconds << "s" << endl;
-    return result;
-}
 
 static void counter_worker_single_step(void *data, long i, int tid) // callback for kt_for()
 {
@@ -4677,26 +4504,26 @@ static void counter_worker_single_step_small_contig(void *data, long i, int tid)
 {
     count_step_small_contig *p = (count_step_small_contig *)data;
 
-
-
+    // 假设 p->contig_chains 是指向 vector<contig_chains> 的指针
+    // 或者我们可以在 count_step 结构体中添加这个字段
     std::vector<contig_chains> &contig_chain = *(p->contig_chains_ptr);
 
     std::vector<contig_chains_small_contig> &contig_chain_small = *(p->contig_chains_ptr_small);
     int total_chains = contig_chain.size();
 
-
-
+    // 我们需要为每个chain对 (i, j) 分配一个唯一的 idx
+    // 但这里我们先处理简单版本：直接使用chain索引
 
     // if (i >= total_chains)
+    //     return; // 安全检查
 
-
-
+    // 获取当前chain的信息
     const auto &chain_i = contig_chain_small[i];
     // cerr<<"chain_i : "<<i<<endl;
-
+    // 遍历所有其他chain
     for (int j = 0; j < total_chains; ++j)
     {
-
+        // // 跳过自己
         // if (chain_i.index == contig_chain[j].other_index || i == j)
         // {
         //     // cerr<<"contig_chain[j].other_index: "<<contig_chain[j].other_index<<" i: "<<i<<" j: "<<j<<" chain_i group_id_new:"<< chain_i.group_id_new <<" chain_j group_id_new:"<< contig_chain[j].group_id_new <<endl;
@@ -4705,13 +4532,13 @@ static void counter_worker_single_step_small_contig(void *data, long i, int tid)
 
         const auto &chain_j = contig_chain[j];
         // cerr<<"chain_j : "<<j<<endl;
-
-
-
+        // 关键修改：使用配对关系来避免bubble两端的计算
+        // 原来的逻辑：if ((i >> 1) != (j >> 1))  // 避免同一个bubble的两端
+        // 新逻辑：如果两个chain是配对的（在同一个bubble的两端），跳过
         bool skip_pair = false;
 
-
-        for (auto node_i : chain_i.utg_path_node)
+        // 原来的内部计算逻辑保持不变，但使用chain_i和chain_j的节点数据
+        for (auto node_i : chain_i.utg_path_node) // 假设utg_path_node存储节点
         {
             for (auto node_j : chain_j.utg_path_node)
             {
@@ -4719,14 +4546,14 @@ static void counter_worker_single_step_small_contig(void *data, long i, int tid)
                 {
                     bool forward = !((node_i % 2 == 0) ^ (node_j % 2 == 0));
 
-
-                    uint32_t pos_i = chain_i.node_positions.at(node_i);
+                    // 使用chain中的节点位置信息
+                    uint32_t pos_i = chain_i.node_positions.at(node_i); // 注意：需要使用安全访问
                     uint32_t pos_j = chain_j.node_positions.at(node_j);
 
-                    uint32_t pos_i_back = chain_i.path_length - pos_i;
+                    uint32_t pos_i_back = chain_i.path_length - pos_i; // 使用path_length
                     uint32_t pos_j_back = chain_j.path_length - pos_j;
 
-
+                    // 原来的距离判断和累加逻辑
                     if (pos_i + pos_j < 10000000)
                     {
                         if (forward)
@@ -4781,24 +4608,24 @@ static void counter_worker_single_step_new(void *data, long i, int tid) // callb
 {
     count_step_new *p = (count_step_new *)data;
 
-
-
+    // 假设 p->contig_chains 是指向 vector<contig_chains> 的指针
+    // 或者我们可以在 count_step 结构体中添加这个字段
     std::vector<contig_chains> &contig_chain = *(p->contig_chains_ptr);
     int total_chains = contig_chain.size();
 
-
-
+    // 我们需要为每个chain对 (i, j) 分配一个唯一的 idx
+    // 但这里我们先处理简单版本：直接使用chain索引
 
     if (i >= total_chains)
-        return;
+        return; // 安全检查
 
-
+    // 获取当前chain的信息
     const auto &chain_i = contig_chain[i];
 
-
+    // 遍历所有其他chain
     for (int j = 0; j < total_chains; ++j)
     {
-
+        // 跳过自己
         if (chain_i.index == contig_chain[j].other_index || i == j)
         {
             // cerr<<"contig_chain[j].other_index: "<<contig_chain[j].other_index<<" i: "<<i<<" j: "<<j<<" chain_i group_id_new:"<< chain_i.group_id_new <<" chain_j group_id_new:"<< contig_chain[j].group_id_new <<endl;
@@ -4807,13 +4634,13 @@ static void counter_worker_single_step_new(void *data, long i, int tid) // callb
 
         const auto &chain_j = contig_chain[j];
 
-
-
-
+        // 关键修改：使用配对关系来避免bubble两端的计算
+        // 原来的逻辑：if ((i >> 1) != (j >> 1))  // 避免同一个bubble的两端
+        // 新逻辑：如果两个chain是配对的（在同一个bubble的两端），跳过
         bool skip_pair = false;
 
-
-        for (auto node_i : chain_i.utg_path_node)
+        // 原来的内部计算逻辑保持不变，但使用chain_i和chain_j的节点数据
+        for (auto node_i : chain_i.utg_path_node) // 假设utg_path_node存储节点
         {
             for (auto node_j : chain_j.utg_path_node)
             {
@@ -4821,14 +4648,14 @@ static void counter_worker_single_step_new(void *data, long i, int tid) // callb
                 {
                     bool forward = !((node_i % 2 == 0) ^ (node_j % 2 == 0));
 
-
-                    uint32_t pos_i = chain_i.node_positions.at(node_i);
+                    // 使用chain中的节点位置信息
+                    uint32_t pos_i = chain_i.node_positions.at(node_i); // 注意：需要使用安全访问
                     uint32_t pos_j = chain_j.node_positions.at(node_j);
 
-                    uint32_t pos_i_back = chain_i.path_length - pos_i;
+                    uint32_t pos_i_back = chain_i.path_length - pos_i; // 使用path_length
                     uint32_t pos_j_back = chain_j.path_length - pos_j;
 
-
+                    // 原来的距离判断和累加逻辑
                     if (pos_i + pos_j < 10000000)
                     {
                         if (forward)
@@ -4883,7 +4710,7 @@ static void counter_worker_single_step_1(void *data, long i, int tid)
 {
     new_count_step *p = (new_count_step *)data;
 
-
+    // ---- 用 lambda 检查 symmetric pair ----
     auto is_symmetric = [&](int a, int b)
     {
         for (auto &pr : p->symmetric_pairs)
@@ -4897,7 +4724,7 @@ static void counter_worker_single_step_1(void *data, long i, int tid)
 
     for (int j = 0; j < p->len; ++j)
     {
-
+        // ====== 修改 1：如果 (i,j) 是 symmetric pair，跳过 ======
         if (!p->symmetric_pairs.empty() && is_symmetric(i, j))
             continue;
         // if (i >> 1 == j >> 1)
@@ -4963,7 +4790,7 @@ static void counter_worker_single_step_1(void *data, long i, int tid)
     }
 }
 
-
+// 拼接序列函数
 string assemble_haplo_sequence(asg_t *graph,
                                uint32_t begin,
                                uint32_t end,
@@ -4993,7 +4820,7 @@ string assemble_haplo_sequence(asg_t *graph,
             uint32_t prev_node = (*haplo_path)[i - 1];
             uint32_t overlap_len = 0;
 
-
+            // 查找 prev_node 是否指向当前 node
             uint32_t num_out = asg_arc_n(graph, prev_node);
             asg_arc_t *out_arcs = asg_arc_a(graph, prev_node);
             bool found = false;
@@ -5009,14 +4836,14 @@ string assemble_haplo_sequence(asg_t *graph,
 
             if (found && overlap_len > 0 && overlap_len <= node_seq.length() && overlap_len <= result.length())
             {
-
+                // 有 overlap，拼接时减去 overlap
                 result += node_seq.substr(overlap_len);
                 cerr << "Overlap between nodes: " << graph->seq[(prev_node >> 1)].name << ((prev_node & 1) ? "-" : "+") << " -> " << graph->seq[(node >> 1)].name << ((node & 1) ? "-" : "+") << endl;
                 // result << node_seq.substr(0, node_seq.length() - next_node_arc[node].ol);
             }
             else
             {
-
+                // 没有 overlap，添加500N，并输出警告
                 result += string(500, 'N');
                 cerr << "[Warning] No overlap between nodes: "
                      << graph->seq[(prev_node >> 1)].name << ((prev_node & 1) ? "-" : "+")
@@ -5028,7 +4855,7 @@ string assemble_haplo_sequence(asg_t *graph,
             // cerr<<"i is:"<<i<<endl;
         }
 
-
+        // 保存节点在结果中的起始位置
         if (node_pos)
             (*node_pos)[node] = result.size() - node_seq.size();
     }
@@ -5149,8 +4976,8 @@ string assemble_haplo_sequence(asg_t *graph,
 //         // assert(next_node != -1);
 //         if (next_node == -1)
 //         {
-
-
+//             // 如果走到这里，说明备选逻辑也没找到节点
+//             // 我们选择把当前 pre_seq 存入结果，然后结束循环
 //             result << pre_seq;
 //             break;
 //         }
@@ -5164,7 +4991,7 @@ string assemble_haplo_sequence(asg_t *graph,
 //         }
 //         else
 //         {
-
+//             // 如果找不到连接关系，overlap 设为 0，防止拼接错位
 //             overlap = 0;
 //         }
 //         current_pos += pre_seq.length() - overlap;
@@ -5223,7 +5050,7 @@ string get_haplotype_sequence(asg_t *graph, set<uint32_t> set_of_nodes, uint32_t
     stringstream result;
     uint32_t node = begin;
 
-
+  
     if (node >> 1 >= graph->n_seq)
         return "";
 
@@ -5259,7 +5086,7 @@ string get_haplotype_sequence(asg_t *graph, set<uint32_t> set_of_nodes, uint32_t
         uint32_t next_node = (uint32_t)-1;
         uint32_t max_counter = 0;
 
-
+     
         for (auto const &[v_id, arc] : next_node_arc)
         {
             if (set_of_nodes.find(v_id >> 1) != set_of_nodes.end() && visited_nodes.find(v_id) == visited_nodes.end())
@@ -5282,7 +5109,7 @@ string get_haplotype_sequence(asg_t *graph, set<uint32_t> set_of_nodes, uint32_t
             }
         }
 
-
+       
         if (next_node == (uint32_t)-1)
         {
             bool found = false;
@@ -5305,20 +5132,20 @@ string get_haplotype_sequence(asg_t *graph, set<uint32_t> set_of_nodes, uint32_t
             }
         }
 
-
+       
         if (next_node == (uint32_t)-1)
         {
-
-            result << pre_seq;
+          
+            result << pre_seq; // 保存最后一个片段
             break;
         }
 
-
+       
         uint32_t overlap = 0;
         if (next_node_arc.count(next_node))
             overlap = next_node_arc[next_node].ol;
 
-
+      
         uint32_t append_len = (pre_seq.length() > overlap) ? (pre_seq.length() - overlap) : 0;
         result << pre_seq.substr(0, append_len);
         current_pos += append_len;
@@ -5337,7 +5164,7 @@ string get_haplotype_sequence(asg_t *graph, set<uint32_t> set_of_nodes, uint32_t
 
     // cout << "Finalizing..." << endl;
 
-
+    // 【最关键的修改：指针判空】
     if (haplo_path != nullptr)
         (*haplo_path) = visited_arcs;
     if (node_pos != nullptr)
@@ -5345,7 +5172,7 @@ string get_haplotype_sequence(asg_t *graph, set<uint32_t> set_of_nodes, uint32_t
 
     return result.str();
 }
-
+// // TODO: 如果发现有不在当前group的节点，即hifiasm 拼接的其他节点，则在调用该函数前应该删除
 // string get_haplotype_sequence_new(asg_t *graph, set<uint32_t> set_of_nodes, vector<uint32_t> pre_path_node, uint32_t begin, uint32_t end, int id, vector<uint32_t> *haplo_path, map<uint32_t, uint32_t> *node_pos)
 // {
 //     stringstream result;
@@ -5354,7 +5181,7 @@ string get_haplotype_sequence(asg_t *graph, set<uint32_t> set_of_nodes, uint32_t
 
 //     uint32_t num_outgoing_arcs = asg_arc_n(graph, node);
 //     asg_arc_t *outgoing_arcs = asg_arc_a(graph, node);
-
+//     // 判断begin方向
 //     bool begin_is_true = false;
 //     for (int i = 0; i < num_outgoing_arcs; i++)
 //     {
@@ -5371,7 +5198,7 @@ string get_haplotype_sequence(asg_t *graph, set<uint32_t> set_of_nodes, uint32_t
 //         num_outgoing_arcs = asg_arc_n(graph, node);
 //         outgoing_arcs = asg_arc_a(graph, node);
 //     }
-
+//     // 结束
 //     set<uint32_t> visited_nodes;
 //     vector<uint32_t> visited_arcs;
 //     uint32_t current_pos = 0;
@@ -5476,7 +5303,7 @@ string get_haplotype_sequence(asg_t *graph, set<uint32_t> set_of_nodes, uint32_t
 //                 res << endl;
 //                 cout << res.str();
 //                 cout << endl;
-
+//                 // TODO:增加下一个节点
 //                 uint32_t cur_raw = node >> 1;
 //                 auto it = find(pre_path_node.begin(), pre_path_node.end(), cur_raw);
 //                 if (it != pre_path_node.end())
@@ -5484,7 +5311,7 @@ string get_haplotype_sequence(asg_t *graph, set<uint32_t> set_of_nodes, uint32_t
 //                     auto idx = it - pre_path_node.begin();
 //                     if (idx + 1 < pre_path_node.size())
 //                     {
-
+//                         uint32_t next_raw = pre_path_node[idx + 1]; // 下一个节点的 raw ID
 
 //                         uint32_t cand1 = (next_raw << 1);     // forward
 //                         uint32_t cand2 = (next_raw << 1) | 1; // reverse
@@ -5503,18 +5330,18 @@ string get_haplotype_sequence(asg_t *graph, set<uint32_t> set_of_nodes, uint32_t
 //                                 // recovered =
 //                             }
 //                         }
-
+//                         // 如果还没决定方向（可能方向不一致），尝试另一个方向
 //                         if (recovered == (uint32_t)-1)
 //                         {
 //                             if (set_of_nodes.count(next_raw))
 //                             {
-
+//                                 // 两个方向都可尝试：优先选择 arc 存在的那个
 //                                 uint32_t try1 = cand1;
 //                                 uint32_t try2 = cand2;
 
 //                                 bool ok1 = false, ok2 = false;
 
-
+//                                 // 判断 cand1 是否有 outgoing arc
 //                                 uint32_t n1 = asg_arc_n(graph, try1);
 //                                 if (n1 > 0)
 //                                     ok1 = true;
@@ -5527,11 +5354,11 @@ string get_haplotype_sequence(asg_t *graph, set<uint32_t> set_of_nodes, uint32_t
 //                                 else if (ok2)
 //                                     recovered = try2;
 //                                 else
-
+//                                     recovered = cand1; // 默认 fallback
 //                             }
 //                         }
 
-
+//                         // 最终将 recovered 作为 next_node
 //                         if (recovered != (uint32_t)-1)
 //                         {
 //                             next_node = recovered;
@@ -5675,7 +5502,7 @@ string get_haplotype_sequence(asg_t *graph, set<uint32_t> set_of_nodes, uint32_t
 
 string get_haplotype_sequence_from_path(
     asg_t *graph,
-    const vector<uint32_t> &path_nodes,
+    const vector<uint32_t> &path_nodes, // 已经预先形成的 path
     uint32_t begin,
     uint32_t end,
     int id,
@@ -5690,7 +5517,7 @@ string get_haplotype_sequence_from_path(
     uint32_t current_pos = 0;
 
     //........................................
-
+    // 如果 begin 没有出度，尝试 begin^1
     if (asg_arc_n(graph, node) == 0)
     {
         if (asg_arc_n(graph, node ^ 1) == 0)
@@ -5709,7 +5536,7 @@ string get_haplotype_sequence_from_path(
     if (node & 1)
         pre_seq = complement(pre_seq);
 
-    size_t path_idx = 0;
+    size_t path_idx = 0; // 当前在 path_nodes 中的索引
 
     while (node != -1)
     {
@@ -5717,14 +5544,14 @@ string get_haplotype_sequence_from_path(
         visited_nodes.insert(node);
         positions[node] = current_pos;
 
-
+        // 到达 end 节点
         if (node == end)
         {
             result << pre_seq;
             break;
         }
 
-
+        // 构建 outgoing arc map
         map<uint32_t, asg_arc_t> next_node_arc;
         uint32_t num_outgoing_arcs = asg_arc_n(graph, node);
         asg_arc_t *outgoing_arcs = asg_arc_a(graph, node);
@@ -5734,16 +5561,16 @@ string get_haplotype_sequence_from_path(
         uint32_t next_node = -1;
         uint32_t max_score = 0;
 
-
+        // 正常二步搜索
         for (auto &buf_node : next_node_arc)
         {
             if (visited_nodes.find(buf_node.first) != visited_nodes.end())
                 continue;
-
+            // 下一步节点在 path_nodes 中
             if (find(path_nodes.begin(), path_nodes.end(), buf_node.first) != path_nodes.end())
             {
                 uint32_t score = 100;
-
+                // 检查下一步的 neighbor 在 path_nodes 中数量
                 uint32_t num_out = asg_arc_n(graph, buf_node.first);
                 asg_arc_t *out_arcs = asg_arc_a(graph, buf_node.first);
                 for (uint32_t j = 0; j < num_out; j++)
@@ -5757,27 +5584,27 @@ string get_haplotype_sequence_from_path(
             }
         }
 
-
+        // 二步搜索失败，尝试直接使用 path_nodes 中下一个节点
         if (next_node == -1)
-        {
+        { // TODO: 这里是有问题的
             if (path_idx + 1 < path_nodes.size())
             {
                 next_node = path_nodes[path_idx + 1];
                 cerr << "Warning: using next node in path directly with 500N gap: "
                      << graph->seq[node >> 1].name << " -> "
                      << graph->seq[next_node >> 1].name << "\n";
-                result << pre_seq << string(500, 'N');
+                result << pre_seq << string(500, 'N'); // 用500N拼接
             }
             else
             {
-
+                // 二步搜索失败，path_nodes 中也没有下一个节点
                 cerr << "Cannot extend path from node " << graph->seq[node >> 1].name << ". Ending haplotype.\n";
                 result << pre_seq;
                 break;
             }
         }
 
-
+        // 更新 sequence
         uint32_t prev_node = node;
         node = next_node;
 
@@ -5788,18 +5615,18 @@ string get_haplotype_sequence_from_path(
         else
         {
             cerr << "ERROR: cannot find arc from " << graph->seq[prev_node >> 1].name << " to " << graph->seq[node >> 1].name << "\n";
-
-
+            // 如果是直接 path 拼接，无 overlap 信息
+            // 已在上一步用 500N 处理
         }
 
         pre_seq = string(graph->seq[node >> 1].seq);
         if (node & 1)
             pre_seq = complement(pre_seq);
 
-        path_idx++;
+        path_idx++; // 跟随 path_nodes 更新索引
     }
 
-
+    // 最后处理 end 节点方向
     if (!visited_arcs.empty() && visited_arcs.back() != end)
     {
         uint32_t last_node = visited_arcs.back();
@@ -5827,7 +5654,7 @@ string get_haplotype_sequence_from_path(
 static void worker_for_single_step(void *data, long i, int tid) // callback for kt_for()
 {
     step_data *s = (step_data *)data;
-    const set<uint32_t> &current_nodes = (*s->current_nodes)[i];
+    set<uint32_t> current_nodes = (*s->current_nodes)[i];
     asg_t *graph = s->p->graph;
     map<uint32_t, set<uint32_t>> *node_path_id_map = s->p->node_path_id_map;
     map<uint32_t, bubble_t *> *node_bubble_map = s->p->node_bubble_map;
@@ -5842,58 +5669,86 @@ static void worker_for_single_step(void *data, long i, int tid) // callback for 
             cur_bubbles.insert((*node_bubble_map)[node]);
         }
     }
+    
+
+    for (auto node : current_nodes)
+    {
+        if (node_bubble_map->find(node) != node_bubble_map->end())
+        {
+            cur_bubbles.insert((*node_bubble_map)[node]);
+        }
+    }
     // cout << "current_nodes.size(): " << current_nodes.size() << endl;
     map<bubble_t *, uint32_t> bubble_path_id_1;
     map<bubble_t *, uint32_t> bubble_path_id_2;
     set<uint32_t> path_1_not_included;
     set<uint32_t> path_2_not_included;
     map<bubble_t *, map<bubble_t *, map<uint32_t, map<uint32_t, uint32_t>>>> bubble_connection;
-    auto accumulate_contact = [&](uint32_t node_1, uint32_t node_2, uint32_t contact_count)
+    for (auto node_1 : current_nodes)
     {
-        auto bubble_it_1 = node_bubble_map->find(node_1);
-        auto bubble_it_2 = node_bubble_map->find(node_2);
-        if (bubble_it_1 != node_bubble_map->end() &&
-            bubble_it_2 != node_bubble_map->end() && contact_count != 0)
+        for (auto node_2 : current_nodes)
         {
-            bubble_t *bub_1 = bubble_it_1->second;
-            bubble_t *bub_2 = bubble_it_2->second;
-            if (bub_1 != bub_2)
+
+            if (node_bubble_map->find(node_1) != node_bubble_map->end() && node_bubble_map->find(node_2) != node_bubble_map->end() && connections_count[node_1][node_2] != 0)
             {
-                const set<uint32_t> &pids_1 = node_path_id_map->at(node_1);
-                const set<uint32_t> &pids_2 = node_path_id_map->at(node_2);
-                for (auto pid_1 : pids_1)
+                bubble_t *bub_1 = (*node_bubble_map)[node_1];
+                bubble_t *bub_2 = (*node_bubble_map)[node_2];
+                if (bub_1 != bub_2)
                 {
-                    for (auto pid_2 : pids_2)
+                    set<uint32_t> pids_1 = (*node_path_id_map)[node_1];
+                    set<uint32_t> pids_2 = (*node_path_id_map)[node_2];
+                    // vector<bubble_t*> to_insert_bub;
+                    // to_insert_bub.push_back(bub_1);
+                    // to_insert_bub.push_back(bub_2);
+                    if (bubble_connection.find(bub_1) == bubble_connection.end())
                     {
-                        bubble_connection[bub_1][bub_2][pid_1][pid_2] += contact_count;
-                        bubble_connection[bub_2][bub_1][pid_2][pid_1] += contact_count;
+                        bubble_connection[bub_1] = map<bubble_t *, map<uint32_t, map<uint32_t, uint32_t>>>();
+                    }
+                    if (bubble_connection[bub_1].find(bub_2) == bubble_connection[bub_1].end())
+                    {
+                        bubble_connection[bub_1][bub_2] = map<uint32_t, map<uint32_t, uint32_t>>();
+                    }
+                    for (auto pid_1 : pids_1)
+                    {
+                        for (auto pid_2 : pids_2)
+                        {
+                            if (bubble_connection[bub_1][bub_2].find(pid_1) == bubble_connection[bub_1][bub_2].end())
+                            {
+                                bubble_connection[bub_1][bub_2][pid_1] = map<uint32_t, uint32_t>();
+                            }
+                            if (bubble_connection[bub_1][bub_2][pid_1].find(pid_2) == bubble_connection[bub_1][bub_2][pid_1].end())
+                            {
+                                bubble_connection[bub_1][bub_2][pid_1][pid_2] = 0;
+                            }
+                            bubble_connection[bub_1][bub_2][pid_1][pid_2] += connections_count[node_1][node_2];
+                        }
+                    }
+
+                    if (bubble_connection.find(bub_2) == bubble_connection.end())
+                    {
+                        bubble_connection[bub_2] = map<bubble_t *, map<uint32_t, map<uint32_t, uint32_t>>>();
+                    }
+                    if (bubble_connection[bub_2].find(bub_1) == bubble_connection[bub_2].end())
+                    {
+                        bubble_connection[bub_2][bub_1] = map<uint32_t, map<uint32_t, uint32_t>>();
+                    }
+                    for (auto pid_1 : pids_1)
+                    {
+                        for (auto pid_2 : pids_2)
+                        {
+                            if (bubble_connection[bub_2][bub_1].find(pid_2) == bubble_connection[bub_2][bub_1].end())
+                            {
+                                bubble_connection[bub_2][bub_1][pid_2] = map<uint32_t, uint32_t>();
+                            }
+                            if (bubble_connection[bub_2][bub_1][pid_2].find(pid_1) == bubble_connection[bub_2][bub_1][pid_2].end())
+                            {
+                                bubble_connection[bub_2][bub_1][pid_2][pid_1] = 0;
+                            }
+                            bubble_connection[bub_2][bub_1][pid_2][pid_1] += connections_count[node_1][node_2];
+                        }
                     }
                 }
             }
-        }
-    };
-
-    if (s->p->use_sparse_connections && s->p->connections_sparse != nullptr)
-    {
-        const auto &sparse = *s->p->connections_sparse;
-        unordered_set<uint32_t> component_members;
-        component_members.reserve(current_nodes.size() * 2 + 1);
-        component_members.insert(current_nodes.begin(), current_nodes.end());
-        for (auto node_1 : current_nodes)
-        {
-            for (const auto &edge : sparse[node_1])
-            {
-                if (component_members.find(edge.first) != component_members.end())
-                    accumulate_contact(node_1, edge.first, edge.second);
-            }
-        }
-    }
-    else
-    {
-        for (auto node_1 : current_nodes)
-        {
-            for (auto node_2 : current_nodes)
-                accumulate_contact(node_1, node_2, connections_count[node_1][node_2]);
         }
     }
     // cout << "Get connections between bubble" << endl;
@@ -6226,223 +6081,12 @@ static void worker_for_single_step(void *data, long i, int tid) // callback for 
     // }
 }
 
-struct phase_dsu_t
-{
-    vector<uint32_t> parent, size;
-    vector<uint8_t> parity;
-    explicit phase_dsu_t(uint32_t n) : parent(n), size(n, 1), parity(n, 0)
-    {
-        iota(parent.begin(), parent.end(), 0);
-    }
-    pair<uint32_t, uint8_t> find(uint32_t x)
-    {
-        if (parent[x] == x)
-            return {x, 0};
-        auto p = find(parent[x]);
-        parity[x] ^= p.second;
-        parent[x] = p.first;
-        return {parent[x], parity[x]};
-    }
-    void unite(uint32_t a, uint32_t b, uint8_t wanted_parity)
-    {
-        auto pa = find(a), pb = find(b);
-        if (pa.first == pb.first)
-            return;
-        if (size[pa.first] < size[pb.first])
-            swap(pa, pb);
-        parent[pb.first] = pa.first;
-        parity[pb.first] = pa.second ^ pb.second ^ wanted_parity;
-        size[pa.first] += size[pb.first];
-    }
-};
-
-struct local_phase_edge_t
-{
-    uint32_t a, b;
-    int64_t coupling;
-};
-
-// Fast replacement for worker_for_single_step. It preserves the exact output
-// contract used downstream, but phases biallelic bubbles on a compact signed
-// graph instead of materialising bubble->bubble->path->path std::maps.
-static void worker_for_single_step_phase_graph(void *data, long i, int tid)
-{
-    step_data *s = (step_data *)data;
-    const set<uint32_t> &current_nodes = (*s->current_nodes)[i];
-    asg_t *graph = s->p->graph;
-    const auto &phase_graph = *s->p->bubble_phase_graph;
-    const auto &bubble_ids = *s->p->bubble_phase_ids;
-
-    set<bubble_t *> cur_bubbles;
-    for (uint32_t node : current_nodes)
-    {
-        auto it = s->p->node_bubble_map->find(node);
-        if (it != s->p->node_bubble_map->end() && it->second != nullptr)
-            cur_bubbles.insert(it->second);
-    }
-
-    vector<bubble_t *> active_bubbles;
-    vector<uint32_t> active_global_ids;
-    unordered_map<uint32_t, uint32_t> global_to_local;
-    global_to_local.reserve(cur_bubbles.size() * 2 + 1);
-    for (bubble_t *bubble : cur_bubbles)
-    {
-        auto id_it = bubble_ids.find(bubble);
-        if (id_it == bubble_ids.end() || bubble->paths_nodes.size() != 2)
-            continue;
-        uint32_t local_id = active_bubbles.size();
-        active_bubbles.push_back(bubble);
-        active_global_ids.push_back(id_it->second);
-        global_to_local[id_it->second] = local_id;
-    }
-
-    vector<local_phase_edge_t> edges;
-    for (uint32_t a = 0; a < active_global_ids.size(); ++a)
-    {
-        uint32_t ga = active_global_ids[a];
-        if (ga >= phase_graph.size())
-            continue;
-        for (const auto &e : phase_graph[ga])
-        {
-            auto jt = global_to_local.find(e.target);
-            if (jt != global_to_local.end() && a < jt->second && e.coupling != 0)
-                edges.push_back({a, jt->second, e.coupling});
-        }
-    }
-
-    {
-        lock_guard<mutex> lock(*s->progress_mutex);
-        cerr << "[SparsePhase][component " << (i + 1) << "/" << s->beg_node->size()
-             << "][thread " << tid << "] nodes=" << current_nodes.size()
-             << " bubbles=" << cur_bubbles.size()
-             << " biallelic=" << active_bubbles.size()
-             << " phase_edges=" << edges.size() << " stage=solve" << endl;
-    }
-
-    sort(edges.begin(), edges.end(), [](const local_phase_edge_t &x, const local_phase_edge_t &y) {
-        uint64_t ax = x.coupling < 0 ? (uint64_t)(-x.coupling) : (uint64_t)x.coupling;
-        uint64_t ay = y.coupling < 0 ? (uint64_t)(-y.coupling) : (uint64_t)y.coupling;
-        if (ax != ay)
-            return ax > ay;
-        if (x.a != y.a)
-            return x.a < y.a;
-        return x.b < y.b;
-    });
-
-    phase_dsu_t dsu(active_bubbles.size());
-    for (const auto &e : edges)
-        dsu.unite(e.a, e.b, e.coupling < 0 ? 1 : 0);
-
-    vector<uint8_t> phase(active_bubbles.size(), 0);
-    for (uint32_t z = 0; z < phase.size(); ++z)
-        phase[z] = dsu.find(z).second;
-
-    // Deterministic bounded coordinate descent. A flip only changes incident
-    // signed edges; full linear passes avoid the legacy repeated nested scans.
-    uint32_t rounds = 0;
-    uint64_t total_flips = 0;
-    for (; rounds < 12; ++rounds)
-    {
-        uint64_t round_flips = 0;
-        for (uint32_t z = 0; z < phase.size(); ++z)
-        {
-            long double gain = 0;
-            uint32_t gz = active_global_ids[z];
-            for (const auto &e : phase_graph[gz])
-            {
-                auto jt = global_to_local.find(e.target);
-                if (jt == global_to_local.end())
-                    continue;
-                const bool same = phase[z] == phase[jt->second];
-                const long double current = same ? (long double)e.coupling : -(long double)e.coupling;
-                gain -= 2.0L * current;
-            }
-            if (gain > 0)
-            {
-                phase[z] ^= 1;
-                ++round_flips;
-            }
-        }
-        total_flips += round_flips;
-        if (round_flips == 0)
-            break;
-    }
-
-    map<bubble_t *, uint32_t> bubble_path_id_1, bubble_path_id_2;
-    for (bubble_t *bubble : cur_bubbles)
-    {
-        bubble_path_id_1[bubble] = 0;
-        bubble_path_id_2[bubble] = bubble->paths_nodes.size() > 1 ? 1 : 0;
-    }
-    for (uint32_t z = 0; z < active_bubbles.size(); ++z)
-    {
-        bubble_path_id_1[active_bubbles[z]] = phase[z] ? 1 : 0;
-        bubble_path_id_2[active_bubbles[z]] = phase[z] ? 0 : 1;
-    }
-
-    set<uint32_t> path_1_included, path_2_included;
-    set<uint32_t> path_1_not_included, path_2_not_included;
-    auto collect_path = [](const map<bubble_t *, uint32_t> &selected,
-                           set<uint32_t> &included,
-                           set<uint32_t> &not_included) {
-        for (const auto &choice : selected)
-        {
-            bubble_t *bubble = choice.first;
-            if (bubble->paths_nodes.empty())
-                continue;
-            uint32_t selected_id = min<uint32_t>(choice.second, bubble->paths_nodes.size() - 1);
-            const set<uint32_t> &selected_nodes = bubble->paths_nodes[selected_id];
-            included.insert(selected_nodes.begin(), selected_nodes.end());
-            for (uint32_t p = 0; p < bubble->paths_nodes.size(); ++p)
-                if (p != selected_id)
-                    for (uint32_t node : bubble->paths_nodes[p])
-                        if (selected_nodes.find(node) == selected_nodes.end())
-                            not_included.insert(node);
-        }
-    };
-    collect_path(bubble_path_id_1, path_1_included, path_1_not_included);
-    collect_path(bubble_path_id_2, path_2_included, path_2_not_included);
-    for (uint32_t node : current_nodes)
-    {
-        if (path_1_not_included.find(node) == path_1_not_included.end())
-            path_1_included.insert(node);
-        if (path_2_not_included.find(node) == path_2_not_included.end())
-            path_2_included.insert(node);
-    }
-
-    {
-        lock_guard<mutex> lock(*s->progress_mutex);
-        cerr << "[SparsePhase][component " << (i + 1) << "/" << s->beg_node->size()
-             << "] rounds=" << (rounds + 1) << " flips=" << total_flips
-             << " hap1_nodes=" << path_1_included.size()
-             << " hap2_nodes=" << path_2_included.size() << " stage=sequence" << endl;
-    }
-    s->haplo_sequences[i * 2] = get_haplotype_sequence(
-        graph, path_1_included, (*s->beg_node)[i], (*s->end_node)[i], 1,
-        &s->haplo_pathes[i * 2], &s->node_positions[i * 2]);
-    s->haplo_sequences[i * 2 + 1] = get_haplotype_sequence(
-        graph, path_2_included, (*s->beg_node)[i], (*s->end_node)[i], 2,
-        &s->haplo_pathes[i * 2 + 1], &s->node_positions[i * 2 + 1]);
-
-    const uint32_t done = s->completed_steps->fetch_add(1) + 1;
-    const double elapsed = chrono::duration<double>(chrono::steady_clock::now() - s->progress_start).count();
-    const double eta = done ? elapsed * (s->beg_node->size() - done) / done : 0;
-    {
-        lock_guard<mutex> lock(*s->progress_mutex);
-        cerr << "[SparsePhase][progress] completed=" << done << "/" << s->beg_node->size()
-             << " remaining=" << (s->beg_node->size() - done)
-             << " elapsed=" << elapsed << "s"
-             << " eta=" << eta << "s" << endl;
-    }
-}
-
 void get_haplotype_path(uint32_t **connection_count_forward, uint32_t **connection_count_backward, asg_t *graph, map<uint32_t, map<uint32_t, set<uint32_t>>> *bubble_chain_graph, char *output_directory, int n_threads, vector<string> enzymes, string identityFile, bool check_identity)
 {
     set<uint32_t> existing_nodes;
 
     cout << "Start get haplotypes" << endl;
     uint32_t **connections_count;
-    vector<vector<pair<uint32_t, uint32_t>>> connections_sparse(graph->n_seq);
     CALLOC(connections_count, graph->n_seq);
     for (int i = 0; i < graph->n_seq; i++)
     {
@@ -6458,8 +6102,6 @@ void get_haplotype_path(uint32_t **connection_count_forward, uint32_t **connecti
             // if(connection_count_forward[i][j]+connection_count_backward[i][j]>0){
             connections_count[i][j] = connection_count_forward[i][j] + connection_count_backward[i][j];
             connections_count[i][j] += connection_count_forward[j][i] + connection_count_backward[j][i];
-            if (connections_count[i][j] != 0)
-                connections_sparse[i].push_back(make_pair((uint32_t)j, connections_count[i][j]));
         }
     }
 
@@ -6577,11 +6219,11 @@ void get_haplotype_path(uint32_t **connection_count_forward, uint32_t **connecti
                 }
             }
 
-
+            // 获取 begin node 和 end node 的名字
             string beg_node_name = graph->seq[bubble->begNode / 2].name;
             string end_node_name = graph->seq[bubble->endNode / 2].name;
 
-
+            // 判断是 pure 还是 complex 并输出信息
             if (nodes.size() > 50)
             {
                 complex_bubbles.push_back(bubble);
@@ -6599,7 +6241,7 @@ void get_haplotype_path(uint32_t **connection_count_forward, uint32_t **connecti
                      << ", Type: pure" << endl;
             }
 
-
+            // 输出包含的 node 节点
             if (nodes.size() >= 1)
             {
                 cout << "Contained Nodes: ";
@@ -6700,13 +6342,6 @@ void get_haplotype_path(uint32_t **connection_count_forward, uint32_t **connecti
     shared_data shared;
     shared.graph = graph;
     shared.connections_count = connections_count;
-    shared.connections_sparse = &connections_sparse;
-    {
-        const char *engine = getenv("HAPFOLD_BUBBLE_CONTACT_ENGINE");
-        shared.use_sparse_connections = (engine == nullptr || string(engine) != "legacy");
-        cerr << "[HapFold] Bubble contact engine: "
-             << (shared.use_sparse_connections ? "sparse" : "legacy") << endl;
-    }
     shared.node_path_id_map = &node_path_id_map;
     shared.node_bubble_map = &node_bubble_map;
     step_data step;
@@ -11600,7 +11235,7 @@ vector<vector<uint32_t>> best_buddy_separate(bool **seen, float **best_buddy, ui
 }
 
 //.....................................................................................................................................
-
+// 存储group转bubble内容
 struct bubble_chain_result
 {
     uint32_t begin, end;
@@ -11632,10 +11267,10 @@ struct ContigPath
     std::string ctg_id;
     uint64_t ctg_length;
     string ctg_seq;
-    std::vector<std::string> utg_path;
+    std::vector<std::string> utg_path; // 按顺序存储utg_id
     std::vector<bool> utg_forward;     //
-    std::vector<uint32_t> utg_starts;
-    std::vector<uint64_t> utg_ends;
+    std::vector<uint32_t> utg_starts;  // 每个utg在contig中的起始位置
+    std::vector<uint64_t> utg_ends;    // 每个utg在contig中的结束位置
     std::vector<uint32_t> utg_nodes;
     bool is_only;
     uint64_t begin, end;
@@ -11724,13 +11359,9 @@ static bool split_flagged_chains(
             restored.beg_node = static_cast<uint32_t>(path.begin);
             restored.end_node = static_cast<uint32_t>(path.end);
             restored.group_id = chain.group_id;
-            // By default preserve an explicit de-scaffolding decision.  The
-            // opt-in diagnostic mode lets restored source contigs compete in
-            // global scaffolding, where endpoint degree and cycle checks still
-            // prevent branching or self-cycles.
-            restored.group_id_new = params.allow_split_chain_rejoin
-                                        ? UINT32_MAX
-                                        : UINT32_MAX - 1;
+            // Sentinel used by the global MCL stage to preserve this explicit
+            // de-scaffolding decision instead of immediately rejoining it.
+            restored.group_id_new = UINT32_MAX - 1;
             restored.other_index = UINT32_MAX;
             restored.is_paired = false;
             restored.path_length = static_cast<uint32_t>(path.ctg_length);
@@ -11800,122 +11431,8 @@ static bool split_flagged_chains(
     std::cerr << "[SplitChain] Split " << split_chain_count
               << " flagged chains into " << restored_contig_count
               << " source contigs; " << chains.size()
-              << " chains remain for global scaffolding; rejoin="
-              << (params.allow_split_chain_rejoin ? "enabled" : "disabled")
-              << "." << std::endl;
+              << " chains remain for global scaffolding." << std::endl;
     return true;
-}
-
-/*
- * Detect locally phased chains whose weakest internal contig junction is not
- * supported by the same Hi-C/Pore-C matrix used for scaffolding.  This is a
- * reference-free guard: it never consults yak, QUAST, a reference assembly or
- * sample-specific contig names.  In the first conservative implementation a
- * suspicious chain is restored to its source contigs before global
- * scaffolding.  The audit files make every decision reproducible and allow a
- * later junction-only implementation without changing the command-line API.
- */
-static bool auto_correct_chains(
-    std::vector<contig_chains> &chains,
-    const std::unordered_map<std::string, ContigPath> &contig_paths,
-    uint32_t **connection_forward,
-    uint32_t **connection_backward,
-    const std::string &output_directory,
-    const GlobalParams &params)
-{
-    if (!params.auto_chain_correction)
-        return true;
-
-    const bool aggressive = params.auto_chain_correction_mode == "aggressive";
-    std::ofstream audit(output_directory + "/auto_chain_correction.tsv");
-    std::ofstream selected(output_directory + "/auto_chain_correction.list");
-    if (!audit || !selected)
-    {
-        std::cerr << "[AutoChain::ERROR] Cannot create correction audit files in "
-                  << output_directory << std::endl;
-        return false;
-    }
-    audit << "chain\tjunction\tleft\tright\tlinks\tbest_alternative\tratio\tdecision\n";
-
-    auto component_links = [&](const ContigPath &a, const ContigPath &b) -> uint64_t {
-        uint64_t total = 0;
-        for (uint32_t av : a.utg_nodes)
-            for (uint32_t bv : b.utg_nodes)
-            {
-                const uint32_t ai = av >> 1, bi = bv >> 1;
-                total += connection_forward[ai][bi];
-                total += connection_backward[ai][bi];
-                total += connection_forward[bi][ai];
-                total += connection_backward[bi][ai];
-            }
-        return total;
-    };
-
-    std::vector<const ContigPath *> all_components;
-    for (const contig_chains &chain : chains)
-        for (const auto &component : chain.contig_info_output)
-        {
-            auto it = contig_paths.find(component.first);
-            if (it != contig_paths.end()) all_components.push_back(&it->second);
-        }
-
-    size_t flagged = 0;
-    for (const contig_chains &chain : chains)
-    {
-        if (chain.contig_info_output.size() < params.auto_chain_min_components)
-            continue;
-        const std::string chain_name = chain.contig_info_output.front().first + "_" +
-                                       std::to_string(chain.contig_info_output.size());
-        bool split_chain = false;
-        for (size_t i = 0; i + 1 < chain.contig_info_output.size(); ++i)
-        {
-            auto left_it = contig_paths.find(chain.contig_info_output[i].first);
-            auto right_it = contig_paths.find(chain.contig_info_output[i + 1].first);
-            if (left_it == contig_paths.end() || right_it == contig_paths.end())
-                continue;
-            const uint64_t links = component_links(left_it->second, right_it->second);
-            uint64_t best_alternative = 0;
-            for (const ContigPath *candidate : all_components)
-            {
-                if (candidate == &left_it->second || candidate == &right_it->second)
-                    continue;
-                best_alternative = std::max(best_alternative,
-                    component_links(left_it->second, *candidate));
-                best_alternative = std::max(best_alternative,
-                    component_links(right_it->second, *candidate));
-            }
-            const double ratio = static_cast<double>(links + 1) /
-                                 static_cast<double>(best_alternative + 1);
-            const bool weak_links = links < params.auto_chain_min_links;
-            const bool weak_ratio = ratio < params.auto_chain_min_confidence;
-            const bool cut = aggressive ? (weak_links || weak_ratio)
-                                        : (weak_links && weak_ratio);
-            audit << chain_name << '\t' << i << '\t'
-                  << left_it->first << '\t' << right_it->first << '\t'
-                  << links << '\t' << best_alternative << '\t' << ratio << '\t'
-                  << (cut ? "split" : "keep") << '\n';
-            split_chain = split_chain || cut;
-        }
-        if (split_chain)
-        {
-            selected << chain_name << '\n';
-            ++flagged;
-        }
-    }
-    audit.close();
-    selected.close();
-
-    if (flagged == 0)
-    {
-        std::cerr << "[AutoChain] No suspicious chain junctions detected." << std::endl;
-        return true;
-    }
-    GlobalParams split_params = params;
-    split_params.split_chain_list = output_directory + "/auto_chain_correction.list";
-    std::cerr << "[AutoChain] Restoring " << flagged
-              << " suspicious chains before global scaffolding; mode="
-              << params.auto_chain_correction_mode << std::endl;
-    return split_flagged_chains(chains, contig_paths, split_params);
 }
 struct UtgCtgMapping
 {
@@ -11936,7 +11453,7 @@ struct UtgCtgMapping
 
 std::vector<UtgCtgMapping> utg_ctg_mappings;
 
-
+// 打印contig路径信息（用于调试）
 void print_contig_paths(std::unordered_map<std::string, ContigPath> &contig_paths)
 {
     for (const auto &[ctg_id, path] : contig_paths)
@@ -11950,7 +11467,7 @@ void print_contig_paths(std::unordered_map<std::string, ContigPath> &contig_path
     }
 }
 
-
+// 读取CSV文件并解析UTG-CTG映射
 bool read_utg_ctg_mapping(const std::string &filename)
 {
     std::ifstream file(filename);
@@ -11961,7 +11478,7 @@ bool read_utg_ctg_mapping(const std::string &filename)
     }
 
     std::string line;
-
+    // 跳过标题行
     if (!std::getline(file, line))
     {
         fprintf(stderr, "Error: Empty file %s\n", filename.c_str());
@@ -11998,7 +11515,7 @@ bool read_utg_ctg_mapping(const std::string &filename)
             mapping.same_dir_reads = std::stoull(token); // 10
             std::getline(ss, token, ',');
             mapping.diff_dir_reads = std::stoull(token); // 11
-            std::getline(ss, mapping.orientation, ',');
+            std::getline(ss, mapping.orientation, ',');  // 12  ← ⭐ 正确读取 orientation
 
             utg_ctg_mappings.push_back(mapping);
         }
@@ -12016,10 +11533,10 @@ bool read_utg_ctg_mapping(const std::string &filename)
     return true;
 }
 
-
+// 构建contig路径
 bool build_contig_paths(std::unordered_map<std::string, ContigPath> &contig_paths)
 {
-
+    // 首先按contig分组
     std::unordered_map<std::string, std::vector<UtgCtgMapping>> ctg_groups;
 
     for (const auto &mapping : utg_ctg_mappings)
@@ -12027,10 +11544,10 @@ bool build_contig_paths(std::unordered_map<std::string, ContigPath> &contig_path
         ctg_groups[mapping.ctg_id].push_back(mapping);
     }
 
-
+    // 为每个contig构建路径
     for (auto &[ctg_id, mappings] : ctg_groups)
     {
-
+        // 按contig_start排序，确保utg顺序正确
         std::sort(mappings.begin(), mappings.end(),
                   [](const UtgCtgMapping &a, const UtgCtgMapping &b)
                   {
@@ -12039,14 +11556,14 @@ bool build_contig_paths(std::unordered_map<std::string, ContigPath> &contig_path
 
         ContigPath path;
         path.ctg_id = ctg_id;
-        path.ctg_length = mappings[0].ctg_length;
+        path.ctg_length = mappings[0].ctg_length; // 所有mapping的ctg_length应该相同
 
         for (const auto &mapping : mappings)
         {
             path.utg_path.push_back(mapping.utg_id);
             path.utg_starts.push_back(mapping.ctg_start);
             path.utg_ends.push_back(mapping.ctg_end);
-
+            // ⭐新增：写入 forward / reverse 方向
             if (mapping.orientation == "forward")
                 path.utg_forward.push_back(true);
             else
@@ -12082,48 +11599,48 @@ void load_gfa_sequences(const std::string &gfa_file,
 
     while (std::getline(file, line))
     {
-
+        // 跳过空行和注释行
         if (line.empty() || line[0] == '#')
         {
             continue;
         }
 
-
+        // 检查是否为S行
         if (line[0] == 'S')
         {
             std::istringstream iss(line);
             std::vector<std::string> tokens;
             std::string token;
 
-
+            // 使用空格或制表符分割
             while (std::getline(iss, token, '\t'))
             {
                 tokens.push_back(token);
             }
 
-
+            // S行至少应该有3个字段：S, name, sequence
             if (tokens.size() >= 3)
             {
                 std::string contig_name = tokens[1];
                 std::string sequence = tokens[2];
                 // if (contig_name.size() < 1000)
                 //     cout << "contig_name:" << contig_name << endl;
-
+                // 在contig_paths中查找对应的contig
                 auto it = contig_paths.find(contig_name);
                 if (it != contig_paths.end())
                 {
-
+                    // 找到contig，存储序列
                     it->second.ctg_seq = sequence;
                     loaded_count++;
 
-
+                    // // 可选：记录序列长度用于调试
                     // it->second.ctg_len = sequence.length();
                 }
                 else
                 {
-
+                    // 可选：如果找不到，记录警告
                     if (missed_count < 10)
-                    {
+                    { // 只显示前10个未找到的警告
                         fprintf(stderr, "Warning: Contig '%s' found in GFA but not in contig_paths\n",
                                 contig_name.c_str());
                     }
@@ -12148,12 +11665,12 @@ void load_gfa_sequences(const std::string &gfa_file,
 
 void read_contig_csv(
     const std::string &utg_ctg_file,
-    const std::string &hap1_gfa,
-    const std::string &hap2_gfa,
+    const std::string &hap1_gfa, // 新增：hap1 gfa文件路径
+    const std::string &hap2_gfa, // 新增：hap2 gfa文件路径
     std::unordered_map<std::string, ContigPath> &contig_paths)
 {
 
-
+    // 读取UTG-CTG映射文件
     if (!utg_ctg_file.empty())
     {
         if (!read_utg_ctg_mapping(utg_ctg_file))
@@ -12162,16 +11679,16 @@ void read_contig_csv(
             return;
         }
 
-
+        // 构建contig路径
         if (!build_contig_paths(contig_paths))
         {
             fprintf(stderr, "Error: Failed to build contig paths\n");
             return;
         }
-
-        load_gfa_sequences(hap1_gfa, contig_paths);
-        load_gfa_sequences(hap2_gfa, contig_paths);
-
+        // 读取gfa文件并将序列存入contig_paths
+        load_gfa_sequences(hap1_gfa, contig_paths); // 加载hap1序列
+        load_gfa_sequences(hap2_gfa, contig_paths); // 加载hap2序列
+        // 可选：打印路径信息用于调试
         // print_contig_paths(contig_paths);
     }
     else
@@ -12182,35 +11699,35 @@ void read_contig_csv(
 
 std::vector<uint32_t> bfs_find_connection(asg_t *g, const std::string &name_first, const std::string &name_next)
 {
-
+    // 解析 utg 名称，提取数字部分
     std::string num_str = name_first.substr(3, 6);
     int num = std::stoi(num_str);
     uint32_t forward_idx = (num - 1) << 1;
     uint32_t reverse_idx = ((num - 1) << 1) + 1;
 
-
+    // 保存路径节点
     std::vector<uint32_t> path_nodes;
     std::unordered_set<uint32_t> visited;
 
-
+    // BFS 队列
     std::queue<std::pair<uint32_t, std::vector<uint32_t>>> q;
 
-
+    // 初始化两个方向
     q.push({forward_idx, {forward_idx}});
     q.push({reverse_idx, {reverse_idx}});
     visited.insert(forward_idx);
     visited.insert(reverse_idx);
 
-
+    // // 获取目标节点的两个方向编号
     // auto [target_forward, target_reverse] = get_utg_directions(name_next);
 
-
+    // BFS 两轮（即最多两步延申）
     while (!q.empty())
     {
         auto [current, curr_path] = q.front();
         q.pop();
 
-
+        // step 1: 查找所有出边
         asg_arc_t *out_arcs = asg_arc_a(g, current);
         uint32_t out_num = asg_arc_n(g, current);
 
@@ -12218,25 +11735,25 @@ std::vector<uint32_t> bfs_find_connection(asg_t *g, const std::string &name_firs
         {
             uint32_t next = out_arcs[i].v;
 
-
+            // 如果已经访问过就跳过
             if (visited.count(next))
                 continue;
 
-
+            // 构造新路径
             std::vector<uint32_t> new_path = curr_path;
 
             new_path.push_back(next);
-            cout << "Recursive traversal: current node=" << current << ", next node=" << next << endl;
-            cout << "Recursive traversal: current node=" << g->seq[current >> 1].name << ", next node=" << g->seq[next >> 1].name << endl;
-
+            cout << "递归调用：当前节点为" << current << "，下一个节点为" << next << endl;
+            cout << "递归调用：当前节点为" << g->seq[current >> 1].name << "，下一个节点为" << g->seq[next >> 1].name << endl;
+            // 判断是否为目标节点的任一方向
             if (g->seq[next >> 1].name == name_next)
             {
-
-                cout << "Found connecting path: " << g->seq[current >> 1].name << "->" << g->seq[next >> 1].name << endl;
+                // 返回完整路径（不含目标节点，只到前一个节点）
+                cout << "找到连接路径：" << g->seq[current >> 1].name << "->" << g->seq[next >> 1].name << endl;
                 return new_path;
             }
 
-
+            // 限制两步延申
             if (new_path.size() <= 2)
             {
                 q.push({next, new_path});
@@ -12245,11 +11762,11 @@ std::vector<uint32_t> bfs_find_connection(asg_t *g, const std::string &name_firs
         }
     }
 
-
+    // 如果没找到目标节点
     return {};
 }
 
-
+// head 方向提供第2个，tail方向提供倒数第二个
 static uint32_t find_seq_index_by_name(const asg_t *g, const std::string &name_first, const std::string &name_next, bool is_head)
 {
     std::string num_str = name_first.substr(3, 6);
@@ -12409,25 +11926,25 @@ void initialize_contig_paths(std::unordered_map<std::string, ContigPath> &contig
 {
     std::cerr << "[INFO] Initializing contig paths and node paths..." << std::endl;
 
-
+    // 遍历每一个 contig
     for (auto &kv : contig_paths)
     {
         ContigPath &ctg_path = kv.second;
 
-
+        // // 如果这个 contig 只有一个 UTG，直接标记 is_only
         // if (ctg_path.utg_path.size() == 1)
         // {
         //     ctg_path.is_only = true;
 
         //     const std::string &utg_name = ctg_path.utg_path[0];
-
-
+        //     // TODO: 根据名称计算 forward_idx
+        //     uint32_t forward_idx = 0; // 这里填入你的转换逻辑
         //     ctg_path.utg_nodes.push_back(forward_idx);
         //     cout << "contig " << kv.first << " has only one UTG " << utg_name << endl;
         //     continue;
         // }
 
-
+        //...........添加utg nodes。。。。。。。
 
         ctg_path.utg_nodes.clear();
 
@@ -12435,20 +11952,20 @@ void initialize_contig_paths(std::unordered_map<std::string, ContigPath> &contig
         {
             const std::string &name = ctg_path.utg_path[i];
 
-
+            // 基本检查
             if (name.size() < 10 || name.substr(0, 3) != "utg")
             {
                 std::cerr << "[Warning] Illegal utg name: " << name << "\n";
                 continue;
             }
 
-
+            // 提取数字部分（例如 utg000008l -> “000008”）
             std::string num_str = name.substr(3, 6);
 
             uint32_t utg_id = 0;
             try
             {
-
+                // 你的 utg_id 是从 1 开始的，所以转换为 0-based
                 utg_id = static_cast<uint32_t>(std::stoul(num_str)) - 1;
             }
             catch (...)
@@ -12457,13 +11974,13 @@ void initialize_contig_paths(std::unordered_map<std::string, ContigPath> &contig
                 continue;
             }
 
-
+            // 获取方向：forward = true / reverse = false
             bool forward = ctg_path.utg_forward[i];
 
-
+            // 生成 ASG node：<<1 为正向，|1 为反向
             uint32_t node = forward ? (utg_id << 1) : ((utg_id << 1) | 1);
 
-
+            // 存入带方向位的节点
             ctg_path.utg_nodes.push_back(node);
         }
 
@@ -12475,14 +11992,14 @@ void initialize_contig_paths(std::unordered_map<std::string, ContigPath> &contig
 
         ctg_path.begin = ctg_path.utg_nodes[0];
         ctg_path.end = ctg_path.utg_nodes.back();
-
+        // 。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。
     }
 
     std::cerr << "[INFO] Finished initializing contig paths." << std::endl;
 }
 
-
-
+// 。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。
+// 匹配contig
 static inline std::string get_utg_name(uint32_t node, asg_t *graph)
 {
     return std::string(graph->seq[node >> 1].name);
@@ -12495,7 +12012,7 @@ void match_and_extend_contigs(
 {
     int hapN = step.beg_node->size() * 2;
 
-
+    // ------- (1) 建立内部 contig 的 utg name 集合 -------
     std::vector<std::vector<std::string>> internal_contigs(hapN);
     for (int i = 0; i < hapN; i++)
     {
@@ -12503,7 +12020,7 @@ void match_and_extend_contigs(
             internal_contigs[i].push_back(get_utg_name(n, graph));
     }
 
-
+    // ------- (2) 将外部 utg_path 转成集合 -------
     std::unordered_map<std::string,
                        std::unordered_set<std::string>>
         external_set;
@@ -12520,7 +12037,7 @@ void match_and_extend_contigs(
         external_set[ctg] = std::move(s);
     }
 
-
+    // ------- (3) 匹配每个内部 contig 到最相似外部 contig -------
     std::vector<std::string> best_match(hapN, "");
 
     for (int i = 0; i < hapN; i++)
@@ -12558,7 +12075,7 @@ void match_and_extend_contigs(
                   << " overlap = " << max_overlap << "\n";
     }
 
-
+    // ------- (4) 对匹配到外部 contig 的内部 contig 进行延伸 -------
     for (int i = 0; i < hapN; i++)
     {
         std::string ext = best_match[i];
@@ -12572,10 +12089,10 @@ void match_and_extend_contigs(
         auto &ext_path = contig_paths[ext].utg_path;
         auto &int_path = internal_contigs[i];
 
-
+        // 将内部转成 set，方便查找
         std::unordered_set<std::string> int_set(int_path.begin(), int_path.end());
 
-
+        // --- 找内部第一个 utg 在外部的位置 ---
         int first_idx = -1;
         for (int k = 0; k < (int)ext_path.size(); k++)
         {
@@ -12586,7 +12103,7 @@ void match_and_extend_contigs(
             }
         }
 
-
+        // --- 找内部最后一个 utg 在外部的位置 ---
         int last_idx = -1;
         for (int k = ext_path.size() - 1; k >= 0; k--)
         {
@@ -12604,22 +12121,22 @@ void match_and_extend_contigs(
             continue;
         }
 
-
+        // ------- (5) 构造最终延伸后的路径 -------
         std::vector<std::string> extended;
 
-
+        // 加外部左侧
         for (int k = 0; k < first_idx; k++)
             extended.push_back(ext_path[k]);
 
-
+        // 加内部
         for (auto &u : int_path)
             extended.push_back(u);
 
-
+        // 加外部右侧
         for (int k = last_idx + 1; k < (int)ext_path.size(); k++)
             extended.push_back(ext_path[k]);
 
-
+        // 替换
         std::cerr << "[extend] hap#" << i
                   << " extended len " << extended.size()
                   << " old len " << int_path.size() << "\n";
@@ -12627,7 +12144,7 @@ void match_and_extend_contigs(
         internal_contigs[i] = extended;
     }
 
-
+    // ------- (6) 输出最终结果 -------
     std::ofstream out(string("extended_contigs.txt"));
     for (int i = 0; i < hapN; i++)
     {
@@ -12653,13 +12170,13 @@ enum LinkType
 
 int step_golbal = 0;
 
-
+// BFS 查找链接
 LinkType bfs_find_link(
     uint32_t start,
     uint32_t begin2,
     uint32_t end2,
     const asg_t *g,
-    bool is_start,
+    bool is_start, // true 表示 contig1 begin, false 表示 contig1 end
     int max_steps = 20)
 {
     std::unordered_set<uint32_t> visited;
@@ -12686,7 +12203,7 @@ LinkType bfs_find_link(
         return NONE;
     };
 
-
+    // 起点就命中
     if (auto t = check_hit(start); t != NONE)
     {
         // std::cout << "[BFS] Step 0: visited_size=" << visited.size() << ", hit_node=" << start << std::endl;
@@ -12694,14 +12211,14 @@ LinkType bfs_find_link(
     }
 
     int step = 0;
-    uint32_t last_processed_node = start;
+    uint32_t last_processed_node = start; // 记录最后处理的节点
 
     while (!q.empty() && step < max_steps)
     {
         int qsize = q.size();
         step++;
         step_golbal++;
-
+        // 用于存储下一层要处理的节点
         std::vector<uint32_t> next_level_nodes;
 
         for (int s = 0; s < qsize; s++)
@@ -12710,10 +12227,10 @@ LinkType bfs_find_link(
             q.pop();
             last_processed_node = u;
 
-
+            // 只处理当前节点的直接邻居（不立即加入队列）
             std::vector<uint32_t> direct_neighbors;
 
-
+            // 正向出度 - 直接邻居
             uint32_t num_out = asg_arc_n(g, u);
             asg_arc_t *out_arcs = asg_arc_a(g, u);
             for (uint32_t i = 0; i < num_out; i++)
@@ -12725,7 +12242,7 @@ LinkType bfs_find_link(
                 }
             }
 
-
+            // 反向出度 - 直接邻居
             uint32_t ru = u ^ 1;
             uint32_t num_out_r = asg_arc_n(g, ru);
             asg_arc_t *out_arcs_r = asg_arc_a(g, ru);
@@ -12738,7 +12255,7 @@ LinkType bfs_find_link(
                 }
             }
 
-
+            // 检查所有直接邻居是否命中
             for (uint32_t v : direct_neighbors)
             {
                 if (auto type = check_hit(v); type != LinkType::NONE)
@@ -12749,7 +12266,7 @@ LinkType bfs_find_link(
                 }
             }
 
-
+            // 将未命中的直接邻居加入下一层
             for (uint32_t v : direct_neighbors)
             {
                 if (!visited.count(v))
@@ -12760,28 +12277,28 @@ LinkType bfs_find_link(
             }
         }
 
-
+        // 将下一层节点加入队列
         for (uint32_t node : next_level_nodes)
         {
             q.push(node);
         }
 
-
+        // // 每步结束输出
         // std::cout << "[BFS] Step " << step << ": visited_size=" << visited.size()
         //           << ", last_processed=" << g->seq[last_processed_node >> 1].name
         //           << ", next_level_nodes=" << next_level_nodes.size() << std::endl;
     }
 
-
-
+    // // 搜索结束但没有命中
+    // std::cout << "没有命中 [BFS] Search ended at step " << step << ": visited_size=" << visited.size()
     //           << ", last_processed=" << g->seq[last_processed_node >> 1].name << std::endl;
     return LinkType::NONE;
 }
 
 int resolve_orientation(LinkType lt, int ori1)
 {
-
-
+    // ori1 为前一个 contig 的方向 (+1 或 -1)
+    // 返回 ctg2 的方向
     switch (lt)
     {
     case PP:
@@ -12806,20 +12323,20 @@ int resolve_orientation(LinkType lt, int ori1)
 
 //     if (lst.size() < 1) return orientation;
 
-
+//     // 链起点方向 = 正向（可根据需要切换）
 //     orientation[lst[0]] = +1;
 
 //     for (int i = 0; i < (int)lst.size() - 1; i++) {
 //         const string &ctg1 = lst[i];
 //         const string &ctg2 = lst[i + 1];
 
-
+//         // 取得 begin/end
 //         uint32_t utg_first = contig_paths.at(ctg1).begin;
 //         uint32_t utg_last  = contig_paths.at(ctg1).end;
 //         uint32_t begin2    = contig_paths.at(ctg2).begin;
 //         uint32_t end2      = contig_paths.at(ctg2).end;
 
-
+//         // 做两次 BFS
 //         LinkType t1 = bfs_find_link(utg_first, begin2, end2, g);
 //         LinkType t2 = bfs_find_link(utg_last,  begin2, end2, g);
 
@@ -12828,7 +12345,7 @@ int resolve_orientation(LinkType lt, int ori1)
 //         else if (t2 != NONE) lt = t2;
 //         else {
 //             cout << "[Warning] No link found between " << ctg1 << " and " << ctg2 << "\n";
-
+//             orientation[ctg2] = orientation[ctg1]; // 默认同方向
 //             continue;
 //         }
 
@@ -12848,25 +12365,25 @@ uint32_t calculate_hic_strength_between_paths(
 {
     uint32_t total_strength = 0;
 
-
+    // 遍历两个路径的所有节点对
     for (uint32_t node1 : path1_nodes)
     {
-
+        // 节点id转换：右移1位
         uint32_t mapped_node1 = node1 >> 1;
 
         for (uint32_t node2 : path2_nodes)
         {
-
+            // 节点id转换：右移1位
             uint32_t mapped_node2 = node2 >> 1;
 
-
+            // 检查forward方向的连接强度
             if (connection_count_forward != nullptr &&
                 connection_count_forward[mapped_node1] != nullptr)
             {
                 total_strength += connection_count_forward[mapped_node1][mapped_node2];
             }
 
-
+            // 检查backward方向的连接强度（如果不为nullptr）
             if (connection_count_backward != nullptr &&
                 connection_count_backward[mapped_node1] != nullptr)
             {
@@ -12879,9 +12396,9 @@ uint32_t calculate_hic_strength_between_paths(
 }
 struct HicConnectivity
 {
-    double density;
-    double z_score;
-    double expected_density;
+    double density;          // 连接密度
+    double z_score;          // 标准化分数
+    double expected_density; // 期望密度（基于背景）
 };
 
 HicConnectivity calculate_hic_connectivity(
@@ -12899,7 +12416,7 @@ HicConnectivity calculate_hic_connectivity(
         return result;
     }
 
-
+    // 1. 计算实际总连接强度
     uint32_t total_strength = 0;
     size_t total_pairs = 0;
 
@@ -12926,7 +12443,7 @@ HicConnectivity calculate_hic_connectivity(
         }
     }
 
-
+    // // 2. 计算路径长度
     double length1 = path1_length, length2 = path2_length;
     // for (uint32_t node : path1_nodes) {
     //     auto it = node_lengths.find(node >> 1);
@@ -12941,15 +12458,15 @@ HicConnectivity calculate_hic_connectivity(
     //     }
     // }
     // if(length2 > 10000000)
-
+    // 3. 计算归一化密度（按长度乘积归一化）
     if (total_pairs > 0 && length1 > 0 && length2 > 0)
     {
         result.density = static_cast<double>(total_strength) / total_pairs;
 
+        // 长度调整因子：长路径有更多连接机会
+        double length_factor = sqrt(length1 * length2) / 1000.0; // 以kb为单位
 
-        double length_factor = sqrt(length1 * length2) / 1000.0;
-
-
+        // 归一化密度 = 平均连接强度 / 长度因子
         result.density = result.density / (1.0 + log10(1.0 + length_factor));
     }
 
@@ -12964,7 +12481,7 @@ string bfs_find_link_new(
     uint32_t start,
     const std::unordered_map<uint32_t, std::string> &utg2contig,
     const asg_t *g,
-    bool is_start,
+    bool is_start, // true 表示 contig1 begin, false 表示 contig1 end
     vector<uint32_t> &add_path,
     bool &is_forward,
     uint32_t **connection_count_forward,
@@ -12987,14 +12504,14 @@ string bfs_find_link_new(
     visited.insert(start);
     q.push(start);
     int step = 0;
-    uint32_t last_processed_node = start;
+    uint32_t last_processed_node = start; // 记录最后处理的节点
 
     while (!q.empty() && step < max_steps)
     {
         int qsize = q.size();
         step++;
         step_golbal++;
-
+        // 用于存储下一层要处理的节点
         std::vector<uint32_t> next_level_nodes;
 
         for (int s = 0; s < qsize; s++)
@@ -13003,10 +12520,10 @@ string bfs_find_link_new(
             q.pop();
             last_processed_node = u;
 
-
+            // 只处理当前节点的直接邻居（不立即加入队列）
             std::vector<uint32_t> direct_neighbors;
 
-
+            // 正向出度 - 直接邻居
             uint32_t num_out = asg_arc_n(g, u);
             asg_arc_t *out_arcs = asg_arc_a(g, u);
             for (uint32_t i = 0; i < num_out; i++)
@@ -13019,7 +12536,7 @@ string bfs_find_link_new(
                 }
             }
 
-
+            // 反向出度 - 直接邻居
             uint32_t ru = u ^ 1;
             uint32_t num_out_r = asg_arc_n(g, ru);
             asg_arc_t *out_arcs_r = asg_arc_a(g, ru);
@@ -13034,7 +12551,7 @@ string bfs_find_link_new(
                 }
             }
 
-
+            // 检查所有直接邻居是否命中
             for (uint32_t v : direct_neighbors)
             {
                 if (utg2contig.find(v) != utg2contig.end())
@@ -13061,14 +12578,14 @@ string bfs_find_link_new(
                                 {
                                     // cerr << "[Block] Contig " << res << " is in complex component, but we already stitched "
                                     //      << stitched_contigs_count << " contigs. Skipping to prevent over-extension." << endl;
-                                    step = 1000;
-                                    continue;
+                                    step = 1000; 
+                                    continue;    
                                 }
                                 // cerr << "Contig " << res << " is in complex component " << ctg_info.group_id << ", skiping to use it." << endl;
                                 if (ctg_info.ctg_length > 10000000)
                                 {
                                     // cerr << "Contig " << res << " is in complex component, ctg_length : " << ctg_info.ctg_length << ", skiping to use it." << endl;
-                                    step = 1000;
+                                    step = 1000; 
                                     continue;
                                 }
                             }
@@ -13096,7 +12613,7 @@ string bfs_find_link_new(
                             }
                             if (ctg_info.utg_nodes.size() > 0)
                             {
-
+                               
                                 int v_index = -1;
                                 for (size_t i = 0; i < ctg_info.utg_nodes.size(); ++i)
                                 {
@@ -13111,10 +12628,10 @@ string bfs_find_link_new(
 
                                 if (v_index >= 0)
                                 {
-
+                                    
                                     double relative_position = static_cast<double>(v_index) / ctg_info.utg_nodes.size();
 
-
+                                    
                                     if (relative_position > 0.5)
                                     {
                                         should_reverse = true;
@@ -13125,26 +12642,26 @@ string bfs_find_link_new(
                                         is_forward = true;
                                     }
 
-
+                                    
                                 }
                             }
-
+                           
 
                             add_path = ctg_info.utg_nodes;
 
-
+                           
                             if (is_forward)
                                 add_path = ctg_info.utg_nodes;
                             else
                             {
-
+                                
                                 std::vector<uint32_t> reversed_nodes;
                                 reversed_nodes.reserve(ctg_info.utg_nodes.size());
 
-
+                               
                                 for (auto it = ctg_info.utg_nodes.rbegin(); it != ctg_info.utg_nodes.rend(); ++it)
                                 {
-
+                                    // 反转节点方向：^1 操作
                                     reversed_nodes.push_back(*it ^ 1);
                                 }
 
@@ -13158,7 +12675,7 @@ string bfs_find_link_new(
                 }
             }
 
-
+            // 将未命中的直接邻居加入下一层
             for (uint32_t v : direct_neighbors)
             {
                 if (!visited.count(v))
@@ -13169,32 +12686,32 @@ string bfs_find_link_new(
             }
         }
         // cout << "[BFS] Step all next_level_nodes:" << endl;
-
+        //  将下一层节点加入队列
         for (uint32_t node : next_level_nodes)
         {
             q.push(node);
             // cout << g->seq[node >> 1].name << " ";
         }
         // cout << endl;
-
+        // 每步结束输出
         // std::cout << "[BFS] Step " << step << ": visited_size=" << visited.size()
         //           << ", last_processed=" << g->seq[last_processed_node >> 1].name
         //           << ", last_processed_node=" << last_processed_node
         //           << ", next_level_nodes=" << next_level_nodes.size() << std::endl;
     }
 
-
-
+    // 搜索结束但没有命中
+    // std::cout << "没有命中 [BFS] Search ended at step " << step << ": visited_size=" << visited.size()
     //           << ", last_processed=" << g->seq[last_processed_node >> 1].name << std::endl;
     return "";
 }
 
-
+// BFS 查找链接
 string bfs_find_link2(
     uint32_t start,
     const std::unordered_map<uint32_t, std::string> &utg2contig,
     const asg_t *g,
-    bool is_start,
+    bool is_start, // true 表示 contig1 begin, false 表示 contig1 end
     int max_steps = 20)
 {
     std::unordered_set<uint32_t> visited;
@@ -13209,14 +12726,14 @@ string bfs_find_link2(
     }
 
     int step = 0;
-    uint32_t last_processed_node = start;
+    uint32_t last_processed_node = start; // 记录最后处理的节点
 
     while (!q.empty() && step < max_steps)
     {
         int qsize = q.size();
         step++;
         step_golbal++;
-
+        // 用于存储下一层要处理的节点
         std::vector<uint32_t> next_level_nodes;
 
         for (int s = 0; s < qsize; s++)
@@ -13225,10 +12742,10 @@ string bfs_find_link2(
             q.pop();
             last_processed_node = u;
 
-
+            // 只处理当前节点的直接邻居（不立即加入队列）
             std::vector<uint32_t> direct_neighbors;
 
-
+            // 正向出度 - 直接邻居
             uint32_t num_out = asg_arc_n(g, u);
             asg_arc_t *out_arcs = asg_arc_a(g, u);
             for (uint32_t i = 0; i < num_out; i++)
@@ -13240,7 +12757,7 @@ string bfs_find_link2(
                 }
             }
 
-
+            // 检查所有直接邻居是否命中
             for (uint32_t v : direct_neighbors)
             {
                 if (utg2contig.find(v) != utg2contig.end())
@@ -13253,7 +12770,7 @@ string bfs_find_link2(
                 }
             }
 
-
+            // 将未命中的直接邻居加入下一层
             for (uint32_t v : direct_neighbors)
             {
                 if (!visited.count(v))
@@ -13264,21 +12781,21 @@ string bfs_find_link2(
             }
         }
 
-
+        // 将下一层节点加入队列
         for (uint32_t node : next_level_nodes)
         {
             q.push(node);
         }
 
-
+        // 每步结束输出
         std::cout << "[BFS] Step " << step << ": visited_size=" << visited.size()
                   << ", last_processed=" << g->seq[last_processed_node >> 1].name
                   << ", last_processed_node=" << last_processed_node
                   << ", next_level_nodes=" << next_level_nodes.size() << std::endl;
     }
 
-
-    std::cout << "No match: [BFS] Search ended at step " << step << ": visited_size=" << visited.size()
+    // 搜索结束但没有命中
+    std::cout << "没有命中 [BFS] Search ended at step " << step << ": visited_size=" << visited.size()
               << ", last_processed=" << g->seq[last_processed_node >> 1].name << std::endl;
     return "";
 }
@@ -13297,12 +12814,12 @@ vector<contig_chains> contig_chain;
 //     {
 //         std::cout << "[Chain Index: " << chain.index << "]" << std::endl;
 
-
+//         // 1. 基本 ID 与状态信息
 //         std::cout << "  Group ID (Old): " << chain.group_id << std::endl;
 //         std::cout << "  Other Index: " << chain.other_index << std::endl;
 //         std::cout << "  Is Paired: " << (chain.is_paired ? "Yes" : "No") << std::endl;
 
-
+//         // 2. 长度与序列信息
 //         std::cout << "  Path Length (Field): " << chain.path_length << " bp" << std::endl;
 
 //         if (chain.haplo_sequences != nullptr)
@@ -13314,18 +12831,18 @@ vector<contig_chains> contig_chain;
 //             std::cout << "  Haplo Sequence Size: 0 (NULL pointer)" << std::endl;
 //         }
 
-
+//         // 3. 详细的 Contig 组成信息 (contig_info_output)
 //         std::cout << "  Contig Composition (" << chain.contig_info_output.size() << " contigs):" << std::endl;
 //         std::cout << "    [";
 //         for (size_t i = 0; i < chain.contig_info_output.size(); ++i)
 //         {
 //             const auto &info = chain.contig_info_output[i];
-
+//             // 输出格式如: CTG123(+)
 //             std::cout << info.first << "(" << (info.second ? "+" : "-") << ")";
 
 //             if (i < chain.contig_info_output.size() - 1)
 //             {
-
+//                 std::cout << " -> "; // 用箭头连接相邻 contig
 //             }
 //         }
 //         std::cout << "]" << std::endl;
@@ -13344,35 +12861,35 @@ void contig_for_phasing(new_count_step &step,
                         std::unordered_map<std::string, ContigPath> &contig_paths,
                         std::vector<std::vector<std::string>> &group_contigs,
                         uint32_t **connection_count_forward,
-                        uint32_t **connection_count_backward)
+                        uint32_t **connection_count_backward) // 新增contig_paths参数
 {
-    uint32_t total_paths = contig_paths.size();
+    uint32_t total_paths = contig_paths.size(); // 每组两个 hap path
     count_step cstep;
 
     cout << "total_paths: " << total_paths << endl;
     // step.haplo_sequences = new string[total_paths];
 
     // step.counting_result = connections_count;
-
+    // 假设 total_paths 是 haplotype path 的数量
     // step.current_contig_names.resize(total_paths);
 
     uint32_t path_idx = 0;
 
-
+    // 步骤1：对于每个contig，找到它所属的group
     std::unordered_map<std::string, size_t> contig_to_group;
     // std::vector<std::vector<std::string>> group_contigs(components.size());
 
-
+    // 先输出components的信息用于调试
     //std::cout << "=== DEBUG: Components Information ===" << std::endl;
     for (size_t comp_id = 0; comp_id < components.size(); ++comp_id)
     {
         //std::cout << "Group " << comp_id << " has " << components[comp_id].size() << " nodes:" << std::endl;
-
+        // 只输出前几个节点作为示例
         int count = 0;
         for (auto node_id : components[comp_id])
         {
             if (count++ < 5)
-            {
+            { // 只显示前5个节点
                 //std::cout << "  " << g->seq[node_id >> 1].name << " (node_id: " << node_id << ")" << std::endl;
             }
         }
@@ -13390,19 +12907,19 @@ void contig_for_phasing(new_count_step &step,
         // std::cout << "\n=== Processing contig: " << ctg_id << " ===" << std::endl;
         // std::cout << "Contig has " << path.utg_path.size() << " UTGs" << std::endl;
         //  std::cout << "Contig seq length: " << path.ctg_length <<" seqsence.size: "<< (path.ctg_seq ? path.ctg_seq.size() : 0) << std::endl;
-
+        //  检查contig路径中的utg属于哪个group
         for (const auto &utg_id : path.utg_path)
         {
-
+            // 提取数字部分，例如 "utg012806l" -> 12806
             uint32_t utg_num = 0;
             std::string num_str = utg_id;
             if (num_str.find("utg") == 0)
             {
-                num_str = num_str.substr(3);
+                num_str = num_str.substr(3); // 去掉"utg"
             }
             if (!num_str.empty() && num_str.back() == 'l')
             {
-                num_str.pop_back();
+                num_str.pop_back(); // 去掉"l"
             }
 
             try
@@ -13415,14 +12932,14 @@ void contig_for_phasing(new_count_step &step,
                 continue;
             }
 
-
+            // 转换为node_id：utg_num << 1 和 (utg_num << 1) + 1
             uint32_t node_forward = utg_num << 1;
             uint32_t node_reverse = (utg_num << 1) + 1;
 
             // std::cout << "  UTG: " << utg_id << " -> num: " << utg_num
             //           << ", nodes: " << node_forward << "(fwd), " << node_reverse << "(rev)" << std::endl;
 
-
+            // 查找这两个node属于哪个group
             for (size_t comp_id = 0; comp_id < components.size(); ++comp_id)
             {
                 const std::set<uint32_t> &group_nodes_set = components[comp_id];
@@ -13437,7 +12954,7 @@ void contig_for_phasing(new_count_step &step,
 
                     if (found_group_id == SIZE_MAX)
                     {
-
+                        // 第一次找到group
                         found_group_id = comp_id;
                         // std::cout << "    First match: assigned to group " << comp_id << std::endl;
                     }
@@ -13446,11 +12963,11 @@ void contig_for_phasing(new_count_step &step,
                         // std::cout << "    CONFLICT: already assigned to group " << found_group_id
                         //           << ", but also found in group " << comp_id << std::endl;
                     }
-                    break;
+                    break; // 找到group就跳出内层循环
                 }
             }
 
-
+            // 如果已经找到group，就跳出utg循环
             if (found_group_id != SIZE_MAX)
             {
                 // std::cout << "  Breaking UTG loop, contig assigned to group " << found_group_id << std::endl;
@@ -13458,7 +12975,7 @@ void contig_for_phasing(new_count_step &step,
             }
         }
 
-
+        // 将contig分配到对应的group
         if (found_group_id != SIZE_MAX)
         {
             contig_to_group[ctg_id] = found_group_id;
@@ -13469,7 +12986,7 @@ void contig_for_phasing(new_count_step &step,
         else
         {
             // std::cerr << ">>> WARNING: Contig " << ctg_id << " does not belong to any group" << std::endl;
-
+            // // 输出前几个UTG用于调试
             // std::cout << "  First few UTGs: ";
             // for (size_t i = 0; i < std::min(path.utg_path.size(), size_t(3)); i++)
             // {
@@ -13479,20 +12996,20 @@ void contig_for_phasing(new_count_step &step,
         }
     }
 
-
+    // 输出每个group的contig统计
     std::cout << "\n=== Final Group Assignment Summary ===" << std::endl;
     for (size_t comp_id = 0; comp_id < group_contigs.size(); ++comp_id)
     {
         std::cout << "Group " << comp_id << " contains " << group_contigs[comp_id].size()
                   << " contigs:" << std::endl;
 
-
+        // 获取当前group的节点集合
         const std::set<uint32_t> &group_nodes_set = components[comp_id];
         for (const auto &ctg_id : group_contigs[comp_id])
         {
             std::cout << "  - " << ctg_id;
             // contig_paths[ctg_id].group_id = comp_id;
-            contig_paths[ctg_id].group_id = comp_id;
+            contig_paths[ctg_id].group_id = comp_id; // 赋值
 
             ContigPath &ctg_info = contig_paths[ctg_id];
 
@@ -13536,17 +13053,17 @@ void contig_for_phasing(new_count_step &step,
     //     //cout << "\n----------------------------------------\n";
     // };
 
-
+    // // 添加一个 haplotype path 的通用函数
     // auto add_path = [&](const vector<uint32_t> &nodes,
     //                     const vector<string> &names,
     //                     const string &tag)
     // {
     //     std::cerr << "Adding " << tag << " path at path_idx = " << path_idx << "\n";
 
-
+    //     // 保存节点序列
     //     step.current_nodes_haplo[path_idx] = nodes;
 
-
+    //     // 计算 node -> position
     //     auto &posmap = step.node_positions[path_idx];
     //     posmap.clear();
     //     uint32_t cur = 0;
@@ -13557,17 +13074,17 @@ void contig_for_phasing(new_count_step &step,
     //         cur += g->seq[n].len;
     //     }
 
-
+    //     // 保存 path 长度
     //     step.path_len[path_idx] = cur;
 
-
+    //     // 保存 contig 名称序列
     //     step.current_contig_names[path_idx] = names;
 
     //     ++path_idx;
     // };
 
-
-
+    // 添加一个 haplotype path 的通用函数
+    // 添加一个 haplotype path 的通用函数
     auto add_path = [&](const vector<uint32_t> &nodes,
                         const vector<string> &names,
                         const string &tag,
@@ -13581,7 +13098,7 @@ void contig_for_phasing(new_count_step &step,
         filtered_nodes.reserve(nodes.size());
         // filtered_names.reserve(names.size());
 
-
+        // 过滤非法节点
         for (size_t i = 0; i < nodes.size(); i++)
         {
             uint32_t n = nodes[i];
@@ -13599,7 +13116,7 @@ void contig_for_phasing(new_count_step &step,
             }
         }
 
-
+        // 如果已经没有有效节点，则不写入 step
         if (filtered_nodes.empty())
         {
             std::cerr << "[Warning] All nodes removed in " << tag
@@ -13611,10 +13128,10 @@ void contig_for_phasing(new_count_step &step,
                   << " (size=" << nodes.size()
                   << " (after filtering: " << filtered_nodes.size() << " nodes)\n";
 
-
+        // 保存节点序列
         step.current_nodes_haplo[path_idx] = filtered_nodes;
 
-
+        // 计算 node -> position
         auto &posmap = step.node_positions[path_idx];
         posmap.clear();
         uint32_t cur = 0;
@@ -13624,15 +13141,15 @@ void contig_for_phasing(new_count_step &step,
             cur += g->seq[n >> 1].len;
         }
 
-
+        // path 的总长度
         step.path_len[path_idx] = cur;
 
-
+        // contig 名称
         step.current_contig_names[path_idx] = names;
 
         ++path_idx;
 
-
+        // 如果 tag 为 "hap1 only" 或 "hap2 only"，再连续存一次，模拟 bubble 两端
         if (tag == "hap1 only" || tag == "hap2 only")
         {
             step.current_nodes_haplo[path_idx] = filtered_nodes;
@@ -13652,10 +13169,10 @@ void contig_for_phasing(new_count_step &step,
             ++path_idx;
         }
 
-
+        // // 保存节点序列
         // step.current_nodes_haplo[path_idx] = filtered_nodes;
 
-
+        // // 计算 node -> position
         // auto &posmap = step.node_positions[path_idx];
         // posmap.clear();
         // uint32_t cur = 0;
@@ -13666,28 +13183,28 @@ void contig_for_phasing(new_count_step &step,
         //     cur += g->seq[n >> 1].len;
         // }
 
-
+        // // path 的总长度
         // step.path_len[path_idx] = cur;
 
-
+        // // contig 名称
         // step.current_contig_names[path_idx] = names;
 
         // ++path_idx;
     };
 
-
-
+    // bubble_chain_results： 提供了每个group里的所有bubble 的 hap1 和hap2
+    // contig_paths： 提供了每contig 所属的group,以及 path（可能不存在），以及path的 utg name
 
     //..................................................................................................................................
-
+    // TODO: 从这里开始对上述内容进行合并
     // ofstream fout("link_directions.csv");
     // fout << "ctg1,ctg2,dir1,dir2\n";
-
-
+    // 提前准备
+    // 记录哪些 contig 已被合并或已被处理（跳过）
     std::unordered_set<std::string> visited_contigs;
     visited_contigs.reserve(contig_paths.size());
 
-
+    // 主循环：对每个 group
     for (size_t gid = 0; gid < group_contigs.size(); ++gid)
     {
         const auto &ctg_ids = group_contigs[gid];
@@ -13697,7 +13214,7 @@ void contig_for_phasing(new_count_step &step,
             continue;
         }
 
-
+        // 按长度降序排序
         std::vector<std::pair<std::string, uint64_t>> vec;
         vec.reserve(ctg_ids.size());
         for (const auto &ctg_id : ctg_ids)
@@ -13712,7 +13229,7 @@ void contig_for_phasing(new_count_step &step,
 
         cout << "\n[Group " << gid << "] start merging " << vec.size() << " contigs (by length desc).\n";
 
-
+        // 记录当前group里的bubble端点
         vector<Group_bubble_begin_end> group_bubble_begin_end;
         std::unordered_map<std::string, int> bubble_node_to_index; // node_name -> bubble_index
 
@@ -13725,20 +13242,20 @@ void contig_for_phasing(new_count_step &step,
             gbe.bubble_index = bubble_index;
             group_bubble_begin_end.push_back(gbe);
 
-
+            // 存储节点名称到bubble索引的映射
             bubble_node_to_index[g->seq[bubble_chain.begin >> 1].name] = bubble_index;
             bubble_node_to_index[g->seq[bubble_chain.end >> 1].name] = bubble_index;
             bubble_index++;
         }
 
-
+        // 用于记录每个bubble的包含情况
         struct BubbleContigInfo
         {
-            std::vector<std::string> begin_contigs;
-            std::vector<std::string> end_contigs;
+            std::vector<std::string> begin_contigs; // 包含begin的contig
+            std::vector<std::string> end_contigs;   // 包含end的contig
         };
         std::unordered_map<int, BubbleContigInfo> bubble_contig_map;
-
+        // --- 新增：记录方向性 ---
         struct BubbleHitInfo
         {
             int node_pos;
@@ -13746,16 +13263,16 @@ void contig_for_phasing(new_count_step &step,
             int bubble_id;
             // string hit_type; // "begin_forward", "begin_reverse", "end_forward", "end_reverse"
         };
-
+        // 记录每个contig的情况
         struct ContigBubbleInfo
         {
             std::string status;               // "none", "begin_only", "end_only", "both"
-            std::vector<int> related_bubbles;
+            std::vector<int> related_bubbles; // 相关的bubble索引
             std::vector<BubbleHitInfo> bubble_hits;
         };
         std::unordered_map<std::string, ContigBubbleInfo> contig_info_map;
 
-
+        // 遍历所有contig
         for (const auto &entry : vec)
         {
             const string &ctg_name = entry.first;
@@ -13769,7 +13286,7 @@ void contig_for_phasing(new_count_step &step,
 
             vector<BubbleHitInfo> bubble_hits;
 
-
+            // 检查contig包含哪些bubble节点
             bool has_begin = false;
             bool has_end = false;
             std::vector<int> found_bubbles;
@@ -13786,15 +13303,15 @@ void contig_for_phasing(new_count_step &step,
 
                 const auto &bubble = group_bubble_begin_end[bid];
 
-
+                // bubble.begin 和 bubble.end 是 arc 的 node，含方向
                 uint32_t b_begin = bubble.begin;
                 uint32_t b_end = bubble.end;
 
                 string b_begin_raw = g->seq[b_begin >> 1].name;
                 string b_end_raw = g->seq[b_end >> 1].name;
 
-
-
+                // utg_id 是无方向 node id（raw）
+                // 需要判断 contig 中 utg_id 与 bubble.begin/bubble.end 的方向关系
                 if (utg_id == b_begin_raw)
                 {
                     has_begin = true;
@@ -13816,11 +13333,11 @@ void contig_for_phasing(new_count_step &step,
                 }
             }
 
-
+            // --- 记录contig信息 ---
             ContigBubbleInfo info;
             info.related_bubbles = found_bubbles;
 
-
+            // 新增：保存方向性命中
             info.bubble_hits = bubble_hits;
 
             if (has_begin && has_end)
@@ -13844,19 +13361,19 @@ void contig_for_phasing(new_count_step &step,
                 //cout << "[Contig " << ctg_name << "] contains NO bubble nodes (len=" << ctg_length << ")\n";
             }
 
-
+            // 输出方向性
             for (const auto &hit : bubble_hits)
             {
                 int bid = hit.bubble_id;
                 const auto &bubble = group_bubble_begin_end[bid];
 
-
+                // 判定是 begin 还是 end
                 bool is_begin = hit.begin_or_end;
 
-
+                // 获取 directed node
                 uint32_t node = is_begin ? bubble.begin : bubble.end;
 
-
+                // 判断方向 forward or reverse
                 bool is_forward = ((node & 1) == 0);
 
                 cout << "   >> bubble " << bid
@@ -13868,7 +13385,7 @@ void contig_for_phasing(new_count_step &step,
                      << ")\n";
             }
 
-
+            // // 输出方向性
             // for (const auto &hit : bubble_hits)
             // {
             //     int bid = hit.bubble_id;
@@ -13878,7 +13395,7 @@ void contig_for_phasing(new_count_step &step,
             //     uint32_t node = is_begin ? bubble.begin : bubble.end;
             //     bool is_forward = ((node & 1) == 0);
 
-
+            //     // 计算 contig 对 bubble 的 traverse 方向
             //     bool contig_forward =
             //         (is_begin && is_forward) || (!is_begin && !is_forward);
 
@@ -13894,9 +13411,9 @@ void contig_for_phasing(new_count_step &step,
             contig_info_map[ctg_name] = info;
         }
 
+        // 。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。
 
-
-
+        // 输出每个bubble的统计信息
         // //cout << "\n=== Bubble Summary for Group " << gid << " ===\n";
         // for (const auto &bubble : group_bubble_begin_end)
         // {
@@ -13920,8 +13437,8 @@ void contig_for_phasing(new_count_step &step,
         //     }
         //     cout << "\n\n";
         // }
-
-
+        // // TODO: 这里输出的contig ，可能恰好不包含bubble的begin /end 节点。
+        // //  输出每个contig的最终情况
         // cout << "=== Contig Status Summary for Group " << gid << " ===\n";
         // for (const auto &entry : vec)
         // {
@@ -13950,23 +13467,23 @@ void contig_for_phasing(new_count_step &step,
         {
             //cout << "\n=== Processing " << haplotype_prefix << " ===" << endl;
 
-
+            // 存储所有构建的contig链
             vector<vector<string>> all_chains;
 
-
+            // 1. 获取所有contig length
             std::vector<uint32_t> unused_lengths;
             uint64_t total_unused_sum = 0;
             for (auto &p : vec)
             {
                 const string &contig_name = p.first;
-                uint64_t contig_length = p.second;
+                uint64_t contig_length = p.second; // 从vec获取长度
                 total_unused_sum += contig_length;
                 unused_lengths.push_back(contig_length);
             }
-
+            // 2. 定义动态阈值 (基于 Nx)
             uint32_t nx_val = 0;
 
-
+            // 在这里设置你想要的比例：
             //  0.50 -> N50
             //  0.80 -> N80
             //  0.90 -> N90
@@ -13974,17 +13491,17 @@ void contig_for_phasing(new_count_step &step,
 
             if (!unused_lengths.empty())
             {
-
+             
                 std::sort(unused_lengths.begin(), unused_lengths.end(), std::greater<uint32_t>());
 
                 uint64_t cumulative_sum = 0;
-
+              
                 uint64_t target_sum = (uint64_t)(total_unused_sum * nx_ratio);
 
                 for (uint32_t length : unused_lengths)
                 {
                     cumulative_sum += length;
-
+                   
                     if (cumulative_sum >= target_sum)
                     {
                         nx_val = length;
@@ -13992,17 +13509,17 @@ void contig_for_phasing(new_count_step &step,
                     }
                 }
             }
-            uint32_t dynamic_threshold = 5000000; //
+            uint32_t dynamic_threshold = 5000000; // 
             //std::cout << "Current Unused NX: " << nx_val << " bp, Dynamic Threshold set to: " << dynamic_threshold << " bp" << std::endl;
-
+           
             if (nx_val > 0 && nx_val < dynamic_threshold)
             {
                 dynamic_threshold = nx_val;
             }
-            bool tried_backward = false;
+            bool tried_backward = false; 
             while (true)
             {
-
+               
                 string start_ctg = "";
                 uint64_t start_length = 0;
                 vector<uint32_t> path_output;
@@ -14011,9 +13528,9 @@ void contig_for_phasing(new_count_step &step,
                 for (auto &p : vec)
                 {
                     const string &contig_name = p.first;
-                    uint64_t contig_length = p.second;
+                    uint64_t contig_length = p.second; 
 
-
+                  
                     if (!used_contigs.count(contig_name) &&
                         contig_length > dynamic_threshold && // 10M = 10,000,000 bp
                         contig_name.rfind(haplotype_prefix, 0) == 0)
@@ -14026,7 +13543,7 @@ void contig_for_phasing(new_count_step &step,
                     }
                 }
 
-
+              
                 if (start_ctg.empty())
                 {
                     // cout << "No more unused " << haplotype_prefix
@@ -14034,17 +13551,17 @@ void contig_for_phasing(new_count_step &step,
                     break;
                 }
 
-
+             
                 vector<string> current_chain;
                 current_chain.push_back(start_ctg);
                 used_contigs.insert(start_ctg);
 
                 bool first_time = true;
                 int extension_steps = 0;
-                const int MAX_EXTENSION_STEPS = 100;
+                const int MAX_EXTENSION_STEPS = 100; 
                 bool now_forward_direction = true;
-                bool next_forward_direction = true;
-
+                bool next_forward_direction = true; 
+           
                 while (extension_steps < MAX_EXTENSION_STEPS)
                 {
                     extension_steps++;
@@ -14063,13 +13580,13 @@ void contig_for_phasing(new_count_step &step,
                     vector<uint32_t> now_next_path;
                     if (first_time)
                     {
-
+                        
                         start_node = cp.group_end;
                         next_contig = bfs_find_link_new(cp.ctg_length, cp.utg_nodes, used_contigs, contig_paths, start_node,
                                                         utg2contig_map, g, 1, now_next_path,
                                                         next_forward_direction, connection_count_forward, connection_count_backward, 30, current_chain.size());
 
-
+                       
                         if (next_contig.empty())
                         {
                             start_node = cp.group_begin;
@@ -14095,7 +13612,7 @@ void contig_for_phasing(new_count_step &step,
                             first_time = false;
                             if (now_forward_direction == false)
                             {
-
+                               
                                 std::vector<uint32_t> reversed_path;
                                 reversed_path.reserve(cp.utg_nodes.size());
                                 for (auto it = cp.utg_nodes.rbegin(); it != cp.utg_nodes.rend(); ++it)
@@ -14103,11 +13620,11 @@ void contig_for_phasing(new_count_step &step,
 
                                     reversed_path.push_back(*it ^ 1);
                                 }
-
+                               
                                 path_output.insert(path_output.end(), reversed_path.begin(), reversed_path.end());
                                 contig_info_output.push_back({current_chain[0], false});
 
-
+                                
                                 if (next_forward_direction == 1)
                                 {
                                     path_output.insert(path_output.end(), now_next_path.begin(), now_next_path.end());
@@ -14115,17 +13632,17 @@ void contig_for_phasing(new_count_step &step,
                                 }
                                 else
                                 {
-                                    path_output.insert(path_output.end(), now_next_path.begin(), now_next_path.end());
+                                    path_output.insert(path_output.end(), now_next_path.begin(), now_next_path.end()); // 路径已经在函数中修改
                                     contig_info_output.push_back({next_contig, false});
                                 }
                             }
                             else
                             {
-
+                              
                                 path_output.insert(path_output.end(), cp.utg_nodes.begin(), cp.utg_nodes.end());
                                 contig_info_output.push_back({current_chain[0], true});
 
-
+                               
                                 if (next_forward_direction == 1)
                                 {
                                     path_output.insert(path_output.end(), now_next_path.begin(), now_next_path.end());
@@ -14133,7 +13650,7 @@ void contig_for_phasing(new_count_step &step,
                                 }
                                 else
                                 {
-                                    path_output.insert(path_output.end(), now_next_path.begin(), now_next_path.end());
+                                    path_output.insert(path_output.end(), now_next_path.begin(), now_next_path.end()); // 路径已经在函数中修改
                                     contig_info_output.push_back({next_contig, false});
                                 }
                             }
@@ -14145,7 +13662,7 @@ void contig_for_phasing(new_count_step &step,
                     }
                     else
                     {
-
+                      
                         if (next_forward_direction == 0)
                         {
                             start_node = cp.group_begin ^ 1;
@@ -14156,14 +13673,14 @@ void contig_for_phasing(new_count_step &step,
                         }
                         if (tried_backward == true)
                         {
-
+                          
                             start_node = path_output.back();
                             //cout << "Trying to extend from " << start_ctg << " in backward direction, start_node: " << start_node << endl;
                         }
                         next_contig = bfs_find_link_new(path_length, path_output, used_contigs, contig_paths, start_node,
                                                         utg2contig_map, g, 1, now_next_path, next_forward_direction,
                                                         connection_count_forward, connection_count_backward, 30, current_chain.size());
-
+                        
                         if (next_contig.empty())
                         {
                             //cout << "Cannot extend further from " << start_ctg << ", start backward search" << endl;
@@ -14171,38 +13688,38 @@ void contig_for_phasing(new_count_step &step,
                             {
                                 //cout << "Cannot extend further from " << start_ctg << ", start flipping path for backward search..." << endl;
 
-
+                             
                                 std::reverse(path_output.begin(), path_output.end());
                                 for (auto &node : path_output)
                                 {
-                                    node ^= 1;
+                                    node ^= 1; 
                                 }
 
-
+                             
                                 std::reverse(contig_info_output.begin(), contig_info_output.end());
                                 for (auto &info : contig_info_output)
                                 {
                                     info.second = !info.second;
                                 }
 
-
+                             
                                 std::reverse(current_chain.begin(), current_chain.end());
 
-
+                              
                                 start_ctg = current_chain.back();
 
-
+                             
                                 start_node = path_output.back();
 
-                                tried_backward = true;
+                                tried_backward = true; 
                                 //cout << "Path flipped. New start contig: " << start_ctg << " Start node: " << start_node << ". Continuing search..." << endl;
 
-
+                              
                                 continue;
                             }
                             else
                             {
-
+                               
                                 break;
                             }
                         }
@@ -14213,7 +13730,7 @@ void contig_for_phasing(new_count_step &step,
                             used_contigs.insert(start_ctg);
                             //cout << "Extended to: " << next_contig << endl;
 
-
+                        
                             if (next_forward_direction == 1)
                             {
                                 path_output.insert(path_output.end(), now_next_path.begin(), now_next_path.end());
@@ -14221,7 +13738,7 @@ void contig_for_phasing(new_count_step &step,
                             }
                             else
                             {
-                                path_output.insert(path_output.end(), now_next_path.begin(), now_next_path.end());
+                                path_output.insert(path_output.end(), now_next_path.begin(), now_next_path.end()); // 路径已经在函数中修改
                                 contig_info_output.push_back({next_contig, false});
                             }
                             auto it2 = contig_paths.find(next_contig);
@@ -14234,9 +13751,9 @@ void contig_for_phasing(new_count_step &step,
                 all_contig_info_output.push_back(contig_info_output);
                 all_path_output.push_back(path_output);
 
+               
 
-
-
+               
                 if (!contig_info_output.empty())
                 {
                     contig_chains now_chains;
@@ -14247,29 +13764,29 @@ void contig_for_phasing(new_count_step &step,
 
                     // ***   *
 
-
+                  
                     now_chains.haplo_sequences = new std::string("");
                     std::string &final_seq = *(now_chains.haplo_sequences);
 
-
+                 
                     for (const auto &info : contig_info_output)
                     {
                         const std::string &ctg_name = info.first;
-                        bool is_forward = info.second;
+                        bool is_forward = info.second; // true 为正向，false 为反向
 
-
+                      
                         auto it = contig_paths.find(ctg_name);
                         if (it != contig_paths.end())
                         {
                             std::string current_seq = it->second.ctg_seq;
 
-
+                         
                             if (!is_forward)
                             {
                                 current_seq = complement(current_seq);
                             }
 
-
+                      
                             final_seq += string(100, 'N');
                             final_seq += current_seq;
                         }
@@ -14291,13 +13808,13 @@ void contig_for_phasing(new_count_step &step,
                     now_chains.index = global_index++;
                     uint32_t current_position = 0;
 
-
+                 
                     for (auto &node : path_output)
                     {
                         uint32_t node_id = node >> 1;
                         uint32_t node_len = g->seq[node_id].len;
 
-
+                        // 存储节点在路径中的起始位置
                         now_chains.node_positions[node] = current_position;
                         asg_arc_t *outgoing_arcs = asg_arc_a(g, node);
                         if (outgoing_arcs[0].ol != 0)
@@ -14309,12 +13826,12 @@ void contig_for_phasing(new_count_step &step,
                             cerr << "Error: node " << node << " has no outgoing arc" << endl;
                             current_position = current_position + node_len;
                         }
-
+                     
                     }
                     contig_chain.push_back(now_chains);
                 }
 
-
+               
 
                 if (extension_steps >= MAX_EXTENSION_STEPS)
                 {
@@ -14342,18 +13859,18 @@ void contig_for_phasing(new_count_step &step,
             // cout << "Start Bubble-Union grouping for Group 2 " << gid << "\n";
             vector<uint32_t> path_hap1;
             vector<uint32_t> path_hap2;
-
+           
             unordered_set<string> used_contigs;
 
             std::unordered_map<uint32_t, std::string> utg2contig_hap1;
             std::unordered_map<uint32_t, std::string> utg2contig_hap2;
-
+       
             for (const auto &p : vec)
             {
-                const std::string &contig = p.first;
+                const std::string &contig = p.first; // contig 名称
 
-
-                if (contig.rfind("h1", 0) == 0)
+               
+                if (contig.rfind("h1", 0) == 0) 
                 {
                     auto it = contig_paths.find(contig);
                     if (it != contig_paths.end())
@@ -14367,7 +13884,7 @@ void contig_for_phasing(new_count_step &step,
                 }
                 else if (contig.rfind("h2", 0) == 0)
                 {
-                    auto it = contig_paths.find(contig);
+                    auto it = contig_paths.find(contig); 
                     if (it != contig_paths.end())
                     {
                         const ContigPath &cp = it->second;
@@ -14379,12 +13896,12 @@ void contig_for_phasing(new_count_step &step,
                 }
                 else
                 {
-
+                  
                     std::cerr << "Warning: Contig '" << contig << "' doesn't start with h1 or h2" << std::endl;
                 }
             }
 
-
+           
 
             vector<vector<uint32_t>> all_path_output_hap1;
             vector<vector<pair<string, bool>>> all_contig_info_output_hap1;
@@ -14394,9 +13911,9 @@ void contig_for_phasing(new_count_step &step,
             auto chains_hap1 = process_haplotype("h1", utg2contig_hap1, all_path_output_hap1, all_contig_info_output_hap1);
             auto chains_hap2 = process_haplotype("h2", utg2contig_hap2, all_path_output_hap2, all_contig_info_output_hap2);
 
-
+         
             uint32_t new_chain_count = contig_chain.size() - processed_chain_count;
-            uint32_t new_start_idx = processed_chain_count;
+            uint32_t new_start_idx = processed_chain_count; 
             // cout << "new_chain_count: " << new_chain_count << endl;
             // cout << "new_start_idx: " << new_start_idx << endl;
             if (new_chain_count == 2)
@@ -14412,17 +13929,17 @@ void contig_for_phasing(new_count_step &step,
                 // std::cout << "Exactly 2 new chains: paired chain " << contig_chain[idx1].index
                 //           << " with chain " << contig_chain[idx2].index << std::endl;
             }
-
+           
             else if (new_chain_count > 2)
             {
                 //std::cout << "Processing11 " << new_chain_count << " new chains" << std::endl;
 
-
+              
                 auto calculate_shared_utg_count = [&](const contig_chains &chain1, const contig_chains &chain2) -> uint32_t
                 {
                     std::unordered_set<std::string> utg_set1;
 
-
+                 
                     for (auto node : chain1.utg_path_node)
                     {
                         uint32_t node_id = node >> 1;
@@ -14432,7 +13949,7 @@ void contig_for_phasing(new_count_step &step,
                         }
                     }
 
-
+                  
                     uint32_t shared_count = 0;
                     for (auto node : chain2.utg_path_node)
                     {
@@ -14446,7 +13963,7 @@ void contig_for_phasing(new_count_step &step,
                     return shared_count;
                 };
 
-
+          
                 std::vector<uint32_t> new_indices;
                 for (uint32_t i = 0; i < new_chain_count; i++)
                 {
@@ -14454,23 +13971,23 @@ void contig_for_phasing(new_count_step &step,
                     if (chain_idx < contig_chain.size())
                     {
                         new_indices.push_back(chain_idx);
-
+                       
                         contig_chain[chain_idx].is_paired = false;
                         contig_chain[chain_idx].other_index = UINT32_MAX;
                     }
                 }
 
-
+             
                 std::vector<bool> is_paired_local(new_indices.size(), false);
                 uint32_t paired_count = 0;
 
                 while (paired_count < new_indices.size() - 1)
-                {
+                { 
                     uint32_t max_shared = 0;
-                    uint32_t best_i_local = UINT32_MAX;
+                    uint32_t best_i_local = UINT32_MAX; // 在new_indices中的位置
                     uint32_t best_j_local = UINT32_MAX;
 
-
+                   
                     for (uint32_t i = 0; i < new_indices.size(); i++)
                     {
                         if (is_paired_local[i])
@@ -14497,18 +14014,18 @@ void contig_for_phasing(new_count_step &step,
                         }
                     }
 
-
+                
                     if (best_i_local == UINT32_MAX || best_j_local == UINT32_MAX)
                     {
                         std::cout << "No more suitable pairs found" << std::endl;
                         break;
                     }
 
-
+               
                     uint32_t best_i_global = new_indices[best_i_local];
                     uint32_t best_j_global = new_indices[best_j_local];
 
-
+                 
                     contig_chain[best_i_global].other_index = contig_chain[best_j_global].index;
                     contig_chain[best_i_global].is_paired = true;
                     contig_chain[best_j_global].other_index = contig_chain[best_i_global].index;
@@ -14523,7 +14040,7 @@ void contig_for_phasing(new_count_step &step,
                     //           << " (shared " << max_shared << " UTGs)" << std::endl;
                 }
 
-
+              
                 for (uint32_t i = 0; i < new_indices.size(); i++)
                 {
                     uint32_t chain_idx = new_indices[i];
@@ -14540,13 +14057,13 @@ void contig_for_phasing(new_count_step &step,
             processed_chain_count = contig_chain.size();
             //.......................
 
-            vector<string> current_chain;
+            vector<string> current_chain; 
 
             string start_ctg = "";
             for (auto &p : vec)
             {
                 const string &contig_name = p.first;
-
+             
                 if (!used_contigs.count(contig_name))
                 {
                     if (contig_name.rfind("h1", 0) == 0)
@@ -14565,7 +14082,7 @@ void contig_for_phasing(new_count_step &step,
             // cout << "Total contigs processed: " << used_contigs.size() << endl;
         }
 
-
+       
 
 
         vector<string> with_bubbles;
@@ -14618,12 +14135,12 @@ void contig_for_phasing(new_count_step &step,
 
         for (auto &grp : bubble_union_groups)
         {
-
+            
 
 
             vector<int> global_order;
-            unordered_set<int> seen;
-
+            unordered_set<int> seen; 
+        
             for (const string &ctg : grp)
             {
                 for (int b : contig_info_map[ctg].related_bubbles)
@@ -14635,14 +14152,14 @@ void contig_for_phasing(new_count_step &step,
                     }
                 }
             }
-
-
+         
+          
             unordered_set<int> bubbles_h1, bubbles_h2;
 
             for (const string &ctg : grp)
             {
                 bool is_h1 = false;
-
+             
                 if ((ctg.rfind("h1", 0) == 0))
                     is_h1 = true;
 
@@ -14655,7 +14172,7 @@ void contig_for_phasing(new_count_step &step,
                 }
             }
 
-
+        
             vector<int> filtered_order;
             for (int b : global_order)
             {
@@ -14663,10 +14180,10 @@ void contig_for_phasing(new_count_step &step,
                     filtered_order.push_back(b);
             }
 
-
+           
             global_order = std::move(filtered_order);
 
-
+        
             unordered_map<int, int> bubble_pos;
             for (int i = 0; i < (int)global_order.size(); i++)
                 bubble_pos[global_order[i]] = i;
@@ -14681,7 +14198,7 @@ void contig_for_phasing(new_count_step &step,
                     h2_list.push_back(ctg);
             }
 
-
+         
             auto bubble_pos_sequence = [&](const string &ctg)
             {
                 const auto &bs = contig_info_map[ctg].related_bubbles;
@@ -14691,7 +14208,7 @@ void contig_for_phasing(new_count_step &step,
                 {
                     auto it = bubble_pos.find(b);
                     if (it == bubble_pos.end())
-                        continue;
+                        continue; 
                     int p = it->second;
                     if (seq.empty() || seq.back() != p)
                         seq.push_back(p);
@@ -14699,7 +14216,7 @@ void contig_for_phasing(new_count_step &step,
                 return seq;
             };
 
-
+        
             auto lexicographical_cmp = [&](const vector<int> &A, const vector<int> &B)
             {
                 size_t na = A.size(), nb = B.size();
@@ -14711,16 +14228,16 @@ void contig_for_phasing(new_count_step &step,
                     if (A[i] > B[i])
                         return false;
                 }
-
+               
                 if (na != nb)
                     return na < nb;
-                return false;
+                return false; 
             };
 
-
+       
             auto sort_ctgs_by_bubble_seq = [&](vector<string> &lst)
             {
-
+                
                 unordered_map<string, vector<int>> seq_map;
                 seq_map.reserve(lst.size());
                 for (const auto &ctg : lst)
@@ -14731,27 +14248,27 @@ void contig_for_phasing(new_count_step &step,
         const auto &A = seq_map[a];
         const auto &B = seq_map[b];
 
-
+      
         if (A.empty() && !B.empty()) return false;
         if (!A.empty() && B.empty()) return true;
-        if (A.empty() && B.empty()) return a < b;
+        if (A.empty() && B.empty()) return a < b; 
 
-
+      
         if (lexicographical_cmp(A, B)) return true;
         if (lexicographical_cmp(B, A)) return false;
 
-
+      
         return a < b; });
             };
 
-
+         
             sort_ctgs_by_bubble_seq(h1_list);
             sort_ctgs_by_bubble_seq(h2_list);
 
-
+         
             if (h1_list.size() > 2)
             {
-
+              
                 const size_t PERM_LIMIT = 8;
                 if (h1_list.size() > PERM_LIMIT)
                 {
@@ -14777,7 +14294,7 @@ void contig_for_phasing(new_count_step &step,
                             const auto &ba = contig_info_map[a].related_bubbles;
                             const auto &bb = contig_info_map[b].related_bubbles;
 
-
+                           
                             if (ba.empty() || bb.empty())
                             {
                                 ok = false;
@@ -14798,7 +14315,7 @@ void contig_for_phasing(new_count_step &step,
                         {
                             found = true;
                             best_perm = perm;
-                            break;
+                            break; 
                         }
                     } while (next_permutation(perm.begin(), perm.end()));
 
@@ -14816,8 +14333,8 @@ void contig_for_phasing(new_count_step &step,
 
             //........
             //cout << "  h1tg chain order:\n";
-
-
+           
+           
             std::vector<uint32_t> merged_hap1_utgs;
             std::vector<uint32_t> merged_hap2_utgs;
             LinkType outside_t1 = LinkType::NONE, outside_t2 = LinkType::NONE;
@@ -14838,11 +14355,11 @@ void contig_for_phasing(new_count_step &step,
             }
             else
             {
+                
 
-
-
+                // 记录每个 contig 最终方向
                 map<string, int> h1_ori;
-                h1_ori[h1_list[0]] = +1;
+                h1_ori[h1_list[0]] = +1; // 链起点默认正向
 
                 for (int i = 0; i < (int)h1_list.size() - 1; i++)
                 {
@@ -14850,7 +14367,7 @@ void contig_for_phasing(new_count_step &step,
                     const string &ctg1 = h1_list[i];
                     const string &ctg2 = h1_list[i + 1];
 
-
+                    // 获取 ctg1 的 utg_path
                     const auto &path1 = contig_paths.at(ctg1).utg_path;
 
                     if (path1.empty())
@@ -14874,7 +14391,7 @@ void contig_for_phasing(new_count_step &step,
                     step2 = step_golbal;
                     step_golbal = 0;
 
-
+                    // 全都没找到
                     if (r1 == LinkType::NONE && r2 == LinkType::NONE)
                     {
                         cout << "[Warning] h1tg No link found from " << ctg1 << " to " << ctg2 << ".\n";
@@ -14884,30 +14401,30 @@ void contig_for_phasing(new_count_step &step,
 
                         if (r1 != LinkType::NONE && r2 != LinkType::NONE)
                         {
-
+                            // 都找到了，选择步数更少的
                             if (step1 <= step2)
                             {
                                 lt = r1;
-
+                               
                             }
                             else
                             {
                                 lt = r2;
-
+                                
                             }
                         }
                         else if (r1 != LinkType::NONE)
                         {
                             lt = r1;
-
+                           
                         }
                         else if (r2 != LinkType::NONE)
                         {
                             lt = r2;
-
+                            
                         }
                     }
-
+                    
                     auto print_link = [&](LinkType l)
                     {
                         string s1 = "+", s2 = "+";
@@ -14928,7 +14445,7 @@ void contig_for_phasing(new_count_step &step,
                              << "\n";
                     };
                     print_link(lt);
-
+                 
                     if (i == 0)
                     {
                         if (lt == 1 || lt == 2)
@@ -14961,21 +14478,21 @@ void contig_for_phasing(new_count_step &step,
                         uint32_t begin2 = contig_paths.at(ctg2).begin;
                         uint32_t end2 = contig_paths.at(ctg2).end;
 
-
+                       
                         int last_b1 = -1;
                         if (!contig_info_map[ctg1].related_bubbles.empty())
                             last_b1 = contig_info_map[ctg1].related_bubbles.back();
 
-
+                       
                         int first_b2 = -1;
                         if (!contig_info_map[ctg2].related_bubbles.empty())
                             first_b2 = contig_info_map[ctg2].related_bubbles.front();
-
+                       
                         if (last_b1 != -1 && last_b1 == first_b2)
                         {
                             if (i == 0)
                             {
-
+                                
                                 if (node_type_global[utg_last] != 3 && node_type_global[begin2] != 3)
                                 {
                                     merged_hap1_utgs.insert(merged_hap1_utgs.end(),
@@ -15025,7 +14542,7 @@ void contig_for_phasing(new_count_step &step,
                             }
                         }
 
-
+                       
                     }
                 }
                 //print_utg_list("merged_hap1_utgs", merged_hap1_utgs);
@@ -15034,7 +14551,7 @@ void contig_for_phasing(new_count_step &step,
             if (outside_t1 == 1)
             {
             }
-
+          
 
             if (h2_list.size() <= 1)
             {
@@ -15083,7 +14600,7 @@ void contig_for_phasing(new_count_step &step,
                     step2 = step_golbal;
                     step_golbal = 0;
 
-
+                   
                     if (r1 == LinkType::NONE && r2 == LinkType::NONE)
                     {
                         // cout << "[Warning] h1tg No link found from " << ctg1 << " to " << ctg2 << ".\n";
@@ -15093,7 +14610,7 @@ void contig_for_phasing(new_count_step &step,
 
                         if (r1 != LinkType::NONE && r2 != LinkType::NONE)
                         {
-
+                           
                             if (step1 <= step2)
                             {
                                 lt = r1;
@@ -15145,7 +14662,7 @@ void contig_for_phasing(new_count_step &step,
                     //     }
                     // }
 
-
+                    
                     auto print_link = [&](LinkType l)
                     {
                         string s1 = "+", s2 = "+";
@@ -15166,7 +14683,7 @@ void contig_for_phasing(new_count_step &step,
                         //      << "\n";
                     };
                     print_link(lt);
-
+                   
                     if (i == 0)
                     {
                         if (lt == 1 || lt == 2)
@@ -15199,12 +14716,12 @@ void contig_for_phasing(new_count_step &step,
                         uint32_t begin2 = contig_paths.at(ctg2).begin;
                         uint32_t end2 = contig_paths.at(ctg2).end;
 
-
+                       
                         int last_b1 = -1;
                         if (!contig_info_map[ctg1].related_bubbles.empty())
                             last_b1 = contig_info_map[ctg1].related_bubbles.back();
 
-
+                     
                         int first_b2 = -1;
                         if (!contig_info_map[ctg2].related_bubbles.empty())
                             first_b2 = contig_info_map[ctg2].related_bubbles.front();
@@ -15264,21 +14781,21 @@ void contig_for_phasing(new_count_step &step,
                 }
             }
 
-
+            // TODO: 测试替换bubble 的代码
 
             if (h1_list.size() == 1)
             {
                 // cout << "h1_list.size() == 1" << "\n";
             }
 
-
+            // 替换 merged_utgs 中包含 bubble 的内部节点
             auto replace_bubble_nodes_new = [&](vector<uint32_t> &merged_utgs,
                                                 const vector<bubble_chain_result> &bubble_list)
             {
                 // cout << "\n================ Bubble Replace Debug ================\n";
                 // cout << "Initial merged_utgs size: " << merged_utgs.size() << endl;
 
-
+                // 建立 merged_utgs 的无方向快速查询
                 unordered_set<uint32_t> merged_no_dir;
                 for (uint32_t n : merged_utgs)
                     merged_no_dir.insert(n >> 1);
@@ -15290,7 +14807,7 @@ void contig_for_phasing(new_count_step &step,
                     uint32_t beg_id = bc.begin >> 1;
                     uint32_t end_id = bc.end >> 1;
 
-
+                    // 查找 begin/end 在 merged_utgs 中的位置
                     auto it_beg = find_if(merged_utgs.begin(), merged_utgs.end(),
                                           [&](uint32_t n)
                                           { return (n >> 1) == beg_id; });
@@ -15307,7 +14824,7 @@ void contig_for_phasing(new_count_step &step,
                     size_t pos_beg = (it_beg != merged_utgs.end() ? it_beg - merged_utgs.begin() : SIZE_MAX);
                     size_t pos_end = (it_end != merged_utgs.end() ? it_end - merged_utgs.begin() : SIZE_MAX);
 
-
+                    
                     size_t count1 = 0, count2 = 0;
                     for (uint32_t n : bc.hap_path1)
                         if (merged_no_dir.count(n >> 1))
@@ -15320,7 +14837,7 @@ void contig_for_phasing(new_count_step &step,
                     // cout << "[Bubble " << bi << "] Choosing hap_path" << (count1 >= count2 ? 1 : 2)
                     //      << " (len=" << chosen_path.size() << ")\n";
 
-
+                    //----------- 构建新的 merged_utgs -----------
                     vector<uint32_t> new_merged;
                     new_merged.reserve(merged_utgs.size() + chosen_path.size());
 
@@ -15329,15 +14846,15 @@ void contig_for_phasing(new_count_step &step,
                     {
                         if (pos_beg <= pos_end)
                         {
-
-
+                            
+                            
                             new_merged.insert(new_merged.end(), merged_utgs.begin(), merged_utgs.begin() + pos_beg);
                             new_merged.insert(new_merged.end(), chosen_path.begin(), chosen_path.end());
                             new_merged.insert(new_merged.end(), merged_utgs.begin() + pos_end + 1, merged_utgs.end());
                         }
                         else
                         {
-
+                           
                             new_merged.insert(new_merged.end(), merged_utgs.begin(), merged_utgs.begin() + pos_end);
 
                             vector<uint32_t> reversed;
@@ -15352,13 +14869,13 @@ void contig_for_phasing(new_count_step &step,
                     }
                     else
                     {
-
+                        
                         continue;
                     }
 
                     merged_utgs.swap(new_merged);
 
-
+                   
                     merged_no_dir.clear();
                     for (uint32_t n : merged_utgs)
                         merged_no_dir.insert(n >> 1);
@@ -15368,7 +14885,7 @@ void contig_for_phasing(new_count_step &step,
                 // cout << "================ End Bubble Replace Debug ================\n";
             };
 
-
+            // 只替换contig 包含整个bubble 的内部节点。
             auto replace_bubble_nodes = [&](vector<uint32_t> &merged_utgs_no_forward,
                                             vector<uint32_t> &merged_utgs,
                                             const vector<string> &ctg_list,
@@ -15378,7 +14895,7 @@ void contig_for_phasing(new_count_step &step,
                 // cout << "\n================ Bubble Replace Debug ================\n";
                 // cout << "Initial merged_utgs size: " << merged_utgs.size() << endl;
 
-
+                // 建立 utg → 是否在 merged 里的快速查询
                 unordered_set<uint32_t> merged_set(merged_utgs_no_forward.begin(), merged_utgs_no_forward.end());
 
                 for (size_t bi = 0; bi < bubble_list.size(); bi++)
@@ -15388,7 +14905,7 @@ void contig_for_phasing(new_count_step &step,
                     uint32_t end = bc.end >> 1;
                     //cout << "\n[Bubble " << bi << "] begin=" << g->seq[beg].name << " end=" << g->seq[end].name << "\n";
 
-
+                    // 每次重新查找，避免迭代器失效
                     auto it_beg = find(merged_utgs_no_forward.begin(), merged_utgs_no_forward.end(), beg);
                     auto it_end = find(merged_utgs_no_forward.begin(), merged_utgs_no_forward.end(), end);
 
@@ -15401,14 +14918,14 @@ void contig_for_phasing(new_count_step &step,
                         continue;
                     }
 
-
+                    // 安全获取位置
                     size_t pos_beg = beg_found ? (it_beg - merged_utgs_no_forward.begin()) : SIZE_MAX;
                     size_t pos_end = end_found ? (it_end - merged_utgs_no_forward.begin()) : SIZE_MAX;
 
                     // cout << "  Found in merged_utgs: pos_beg=" << pos_beg
                     //      << " pos_end=" << pos_end << "\n";
 
-
+                    // 安全检查：确保位置有效
                     if (beg_found && pos_beg >= merged_utgs_no_forward.size())
                     {
                         // cout << "  ERROR: Invalid pos_beg: " << pos_beg << ", skipping bubble\n";
@@ -15420,7 +14937,7 @@ void contig_for_phasing(new_count_step &step,
                         continue;
                     }
 
-
+                    //------------ 判断 hap_path1 与 hap_path2 overlap ----------
                     size_t count1 = 0, count2 = 0;
                     for (uint32_t n : bc.hap_path1)
                         if (merged_set.count(n >> 1))
@@ -15429,7 +14946,7 @@ void contig_for_phasing(new_count_step &step,
                         if (merged_set.count(n >> 1))
                             count2++;
 
-
+                    // 安全检查：确保chosen_path有效
                     if (bc.hap_path1.empty() || bc.hap_path2.empty())
                     {
                         // cout << "  ERROR: Empty hap_path, skipping bubble\n";
@@ -15438,7 +14955,7 @@ void contig_for_phasing(new_count_step &step,
 
                     const vector<uint32_t> *chosen_path =
                         (count1 >= count2 ? &bc.hap_path1 : &bc.hap_path2);
-
+                    // 转换chosen_path中的所有节点
                     vector<uint32_t> transformed_path;
                     transformed_path.reserve(chosen_path->size());
 
@@ -15469,32 +14986,32 @@ void contig_for_phasing(new_count_step &step,
 
                         if (!swapped)
                         {
-
+                            // 正向：替换 [pos_beg … pos_end]
                             // cout << "  → Replace interval: [" << pos_beg << " … " << pos_end << "]\n";
 
-
+                            // 安全检查：确保区间有效
                             if (pos_beg >= merged_utgs.size() || pos_end >= merged_utgs.size() || pos_beg > pos_end)
                             {
                                 // cout << "  ERROR: Invalid interval, skipping bubble\n";
                                 continue;
                             }
 
-
+                            // 保留前段 [0, pos_beg]
                             if (pos_beg > 0)
                             {
                                 new_utgs.insert(new_utgs.end(),
                                                 merged_utgs.begin(),
                                                 merged_utgs.begin() + pos_beg);
                             }
-
+                            // // 添加begin节点
                             // new_utgs.push_back(merged_utgs[pos_beg]);
 
-
+                            // 插入 chosen_path（正向）
                             new_utgs.insert(new_utgs.end(),
                                             transformed_path.begin(),
                                             transformed_path.end());
 
-
+                            // 保留后段 [pos_end, end]
                             if (pos_end < merged_utgs.size() - 1)
                             {
                                 new_utgs.insert(new_utgs.end(),
@@ -15504,31 +15021,31 @@ void contig_for_phasing(new_count_step &step,
                         }
                         else
                         {
-
+                            // 反向 bubble：替换 [pos_end … pos_beg]
                             // cout << "  → Replace interval (reversed): [" << pos_end << " … " << pos_beg << "]\n";
 
-
+                            // 安全检查：确保区间有效
                             if (pos_end >= merged_utgs.size() || pos_beg >= merged_utgs.size() || pos_end > pos_beg)
                             {
                                 // cout << "  ERROR: Invalid reversed interval, skipping bubble\n";
                                 continue;
                             }
 
-
+                            // 保留前段 [0, pos_end]
                             if (pos_end > 0)
                             {
                                 new_utgs.insert(new_utgs.end(),
                                                 merged_utgs.begin(),
                                                 merged_utgs.begin() + pos_end);
                             }
-
+                            // // 添加end节点
                             // new_utgs.push_back(merged_utgs[pos_end]);
 
-
+                            // 插入 chosen_path（反向）
                             for (auto it = transformed_path.rbegin(); it != transformed_path.rend(); ++it)
                                 new_utgs.push_back(*it);
 
-
+                            // 保留后段 [pos_beg, end]
                             if (pos_beg < merged_utgs.size() - 1)
                             {
                                 new_utgs.insert(new_utgs.end(),
@@ -15539,7 +15056,7 @@ void contig_for_phasing(new_count_step &step,
 
                         // cout << "  Size: " << merged_utgs.size() << " → " << new_utgs.size() << "\n";
 
-
+                        // 安全检查：确保新vector有效
                         if (new_utgs.empty())
                         {
                             // cout << "  ERROR: New utgs is empty, skipping update\n";
@@ -15548,13 +15065,13 @@ void contig_for_phasing(new_count_step &step,
 
                         merged_utgs.swap(new_utgs);
 
-
+                        // 更新merged_set以便后续bubble使用
                         merged_set.clear();
                         merged_set.insert(transformed_path_no_forward.begin(), transformed_path_no_forward.end());
 
                         continue;
                     }
-
+                    // 其他情况（B和C）暂时注释掉，先确保A情况稳定
                     // cout << "  Skip: Only one endpoint found (cases B & C disabled for now)\n";
                 }
 
@@ -15562,10 +15079,10 @@ void contig_for_phasing(new_count_step &step,
                 // cout << "Final merged_utgs size: " << merged_utgs.size() << endl;
             };
             //---------------------------------------------------------
-
+            // 对 merged_hap1_utgs 和 merged_hap2_utgs 逐个替换
             //---------------------------------------------------------
 
-
+            // 根据 ctg_list 找到所有 bubble
             vector<bubble_chain_result> bubble_list;
             unordered_set<int> used_bubble_idx;
 
@@ -15623,7 +15140,7 @@ void contig_for_phasing(new_count_step &step,
                 replace_bubble_nodes_new(merged_hap1_utgs,
                                          bubble_list);
 
-
+                
             }
 
             // cout << "============= AFTER hap1 bubble replace =============\n";
@@ -15655,12 +15172,12 @@ void contig_for_phasing(new_count_step &step,
             // cout << "============= AFTER hap2 bubble replace =============\n";
             // print_utg_list("merged_hap2_utgs", merged_hap2_utgs);
             // cout << "13603" << endl;
-
+            // TODO: 测试替换bubble 的代码
 
             // ....................................................................................................
+            // 替换简洁版本
 
-
-
+            // ------------ 主逻辑开始 ------------
             // cout << "Now begin to merge the haplotype sequences...\n";
 
             bool h1_empty = merged_hap1_utgs.empty();
@@ -15700,19 +15217,19 @@ void contig_for_phasing(new_count_step &step,
                 int right_idx = path_idx;
                 add_path(merged_hap2_utgs, h2_list, "hap2 (merged)", components[gid]);
 
-
+                // 对称关系
                 step.symmetric_pairs.push_back({left_idx, right_idx});
             }
 
             //  ======================
-
+            //   主逻辑调用
             //  ======================
             //cout << "\n";
         }
     }
 
     // print_contig_chains(contig_chain);
-
+    // TODO: 测试 step 内容填充是否完整
 
     // auto debug_print_step = [&](const new_count_step &step, const string &tag)
     // {
@@ -15755,11 +15272,11 @@ void contig_for_phasing(new_count_step &step,
 
     // };
 
-
+   
     std::unordered_set<std::string> used_contigs;
     used_contigs.reserve(path_idx * 2);
 
-
+   
 
     // cout << "[Info] Final path_idx = " << path_idx << "\n";
     step.len = path_idx - 1;
@@ -15786,7 +15303,7 @@ void match_hap_results_with_contigs(
         std::cerr << "[Error] Cannot open single_contig_names.txt for writing!\n";
     }
 
-
+   
     unordered_map<uint32_t, vector<string>> utg_to_contigs;
 
     for (const auto &[ctg_id, cp] : contig_paths)
@@ -15810,9 +15327,9 @@ void match_hap_results_with_contigs(
         std::cerr << "[Error] Cannot open contig_composition.txt for writing!\n";
     }
 
-    int seq_id = 0;
+    int seq_id = 0; 
 
-
+   
     for (size_t comp_id = 0; comp_id < hap_results.size(); comp_id++)
     {
         // cout << "\n========== Component " << comp_id << " ==========\n";
@@ -15829,7 +15346,7 @@ void match_hap_results_with_contigs(
 
             set<string> matched_contigs;
 
-
+            // 匹配 hap_path 上每个 node
             for (auto node : hap.hap_path)
             {
                 if (utg_to_contigs.count(node))
@@ -15845,13 +15362,13 @@ void match_hap_results_with_contigs(
                 continue;
             }
 
-
+            // 4. 将结果直接写入到 txt 文件中
             bool has_new_contig = false;
             string log_line = "contig_" + std::to_string(seq_id) + "\t";
 
             for (auto &ctg : matched_contigs)
             {
-
+                // 如果你想保留原有的去重逻辑，只记录未访问过的
                 if (!visited_contigs_in_hap.count(ctg))
                 {
                     visited_contigs_in_hap.insert(ctg);
@@ -15859,13 +15376,13 @@ void match_hap_results_with_contigs(
                     has_new_contig = true;
                 }
             }
-
+            // 如果这一行有新记录的 contig，就写入文件并递增编号
             if (has_new_contig)
             {
                 comp_out << log_line << "\n";
                 seq_id++;
             }
-
+            // -------------------- 写入文件 --------------------
             if (name_out.is_open())
             {
                 bool first = true;
@@ -15878,7 +15395,7 @@ void match_hap_results_with_contigs(
                 }
                 name_out << std::endl;
             }
-
+            // 检查 contig 是否比 hap path 更长
             for (auto &ctg : matched_contigs)
             {
                 const auto &cp = contig_paths.at(ctg);
@@ -15902,7 +15419,7 @@ void match_hap_results_with_contigs(
                 }
             }
         }
-
+        // 处理未访问节点
         const auto &unv_list = unvisited_nodes[comp_id];
         // cout << "\nChecking unvisited nodes...\n";
 
@@ -15955,7 +15472,7 @@ std::vector<std::vector<bubble_chain_result>> update_bubble_chain_paths(
                 if (named.hap1.empty() || named.hap2.empty())
                     continue;
 
-
+                // 取每条路径的起点终点
                 const std::string &hap1_beg = named.hap1.front();
                 const std::string &hap1_end = named.hap1.back();
                 const std::string &hap2_beg = named.hap2.front();
@@ -16001,7 +15518,7 @@ std::vector<std::vector<bubble_chain_result>> update_bubble_chain_paths(
 
                 result[comp_id].push_back(bcr);
                 found_match = true;
-                break;
+                break; // 假设每个 bubble_chain 只对应一个 named_contig
             }
 
             if (!found_match)
@@ -16064,29 +15581,29 @@ void analyze_connections(uint32_t **connect_small, int m, int n,
                          const std::vector<contig_chains_small_contig> &small_contig)
 {
 
-
+    // 存储每个small_contig的最佳连接信息
     struct BestConnection
     {
-        int best_contig_idx = -1;
-        int best_direction_i = -1;
-        int best_direction_j = -1;
-        uint32_t best_value = 0;
-        int best_i = -1;
-        int best_j = -1;
+        int best_contig_idx = -1;  // 最佳连接的contig_chain索引
+        int best_direction_i = -1; // small_contig的方向 (0:+, 1:-)
+        int best_direction_j = -1; // contig_chain的方向 (0:+, 1:-)
+        uint32_t best_value = 0;   // 最大连接值
+        int best_i = -1;           // 原始矩阵行索引
+        int best_j = -1;           // 原始矩阵列索引
     };
 
-
+    // 为每个small_contig存储最佳连接
     std::vector<BestConnection> best_connections(m, BestConnection());
 
     std::cerr << "\n=== Analyzing connections for " << m << " small contigs ===" << std::endl;
 
-
+    // 遍历所有行 (m*2行)
     for (int i = 0; i < m * 2; i++)
     {
-        int small_contig_idx = i >> 1;
-        int direction_i = i & 1;
+        int small_contig_idx = i >> 1; // small_contig索引
+        int direction_i = i & 1;       // 方向 (0:+, 1:-)
 
-
+        // 找到当前行的最大值
         uint32_t row_max = 0;
         int max_col = -1;
 
@@ -16099,7 +15616,7 @@ void analyze_connections(uint32_t **connect_small, int m, int n,
             }
         }
 
-
+        // 输出当前行的信息
         std::cerr << "Row " << i << " (small_contig: " << small_contig[small_contig_idx].contig_name
                   << ", direction: " << (direction_i == 0 ? "+" : "-")
                   << "): max = " << row_max;
@@ -16114,7 +15631,7 @@ void analyze_connections(uint32_t **connect_small, int m, int n,
         }
         std::cerr << std::endl;
 
-
+        // 更新当前small_contig的最佳连接
         if (row_max > best_connections[small_contig_idx].best_value)
         {
             best_connections[small_contig_idx].best_value = row_max;
@@ -16130,7 +15647,7 @@ void analyze_connections(uint32_t **connect_small, int m, int n,
         }
     }
 
-
+    // 输出每个small_contig的最终最佳连接
     std::cerr << "\n=== Final best connections ===" << std::endl;
     for (int i = 0; i < m; i++)
     {
@@ -16154,7 +15671,7 @@ void analyze_connections(uint32_t **connect_small, int m, int n,
         }
     }
 
-
+    // // 如果需要将结果保存到数据结构中
     // struct ConnectionResult {
     //     std::string small_contig_name;
     //     std::string contig_chain_name;
@@ -16183,13 +15700,13 @@ void analyze_connections(uint32_t **connect_small, int m, int n,
     //     }
     // }
 
-
+    // // 按强度降序排序
     // std::sort(final_results.begin(), final_results.end(),
     //           [](const ConnectionResult& a, const ConnectionResult& b) {
     //               return a.strength > b.strength;
     //           });
 
-
+    // // 输出排序后的结果
     // std::cerr << "\n=== Sorted connections by strength ===" << std::endl;
     // for (const auto& result : final_results) {
     //     std::cerr << result.small_contig_name << result.direction_small
@@ -16201,23 +15718,23 @@ void analyze_connections(uint32_t **connect_small, int m, int n,
 }
 
 /**
- * Calculate a dynamic threshold from the Hi-C contact matrix.
- * @param connect_small contact matrix (2*m by 2*n)
- * @param m number of small contigs
- * @param n number of grouped contigs
- * @param ratio filtering ratio (typically 0.1 to 0.5)
- * @return calculated minimum threshold
+ * 根据 Hi-C 信号矩阵计算动态阈值
+ * @param connect_small 信号矩阵 (2*m x 2*n)
+ * @param m small contigs 数量
+ * @param n group contigs 数量
+ * @param ratio 过滤比例系数 (建议 0.1 - 0.5)
+ * @return 计算出的最小阈值
  */
 uint32_t calculate_dynamic_threshold(uint32_t **connect_small, size_t m, size_t n, double ratio = 0.1)
 {
     std::vector<uint32_t> max_signals;
     uint64_t sum_max = 0;
 
-
+    // 遍历每一个 small contig (包含正反向)
     for (size_t i = 0; i < m * 2; i++)
     {
         uint32_t current_max = 0;
-
+        // 寻找它与任意 group contig 的最大连接
         for (size_t j = 0; j < n * 2; j++)
         {
             if (connect_small[i][j] > current_max)
@@ -16236,10 +15753,10 @@ uint32_t calculate_dynamic_threshold(uint32_t **connect_small, size_t m, size_t 
     if (max_signals.empty())
         return 0;
 
-
+    // 计算平均最大信号强度
     double avg_signal = (double)sum_max / max_signals.size();
 
-
+    // 返回阈值
     uint32_t threshold = (uint32_t)(avg_signal * ratio);
 
     std::cerr << "[Info] Dynamic Threshold Calculation: Avg Max Signal = " << avg_signal
@@ -16248,12 +15765,12 @@ uint32_t calculate_dynamic_threshold(uint32_t **connect_small, size_t m, size_t 
 
     return threshold;
 }
-
+// 辅助结构：记录待合并的 Small Contig 信息
 struct MergeRequest
 {
-    size_t small_idx;
-    int matrix_row_idx;
-    uint32_t strength;
+    size_t small_idx;   // 在 small_contig vector 中的索引
+    int matrix_row_idx; // 在矩阵中的行号 (2*i 或 2*i+1)，用于判断 small 是否需要反转
+    uint32_t strength;  // 连接强度
 };
 
 void merge_small_contigs_to_groups_final(
@@ -16268,7 +15785,7 @@ void merge_small_contigs_to_groups_final(
 
     std::cerr << "[DEBUG] Start merge_small_contigs_to_groups_final. m=" << m << ", n=" << n << std::endl;
 
-
+    // 1. 收集请求
     std::vector<std::vector<MergeRequest>> head_requests(n);
     std::vector<std::vector<MergeRequest>> tail_requests(n);
 
@@ -16306,17 +15823,17 @@ void merge_small_contigs_to_groups_final(
 
     std::cerr << "[DEBUG] Requests collected. Total valid merge requests: " << total_requests_count << std::endl;
 
-
+    // 2. 执行合并
     for (size_t j = 0; j < n; j++)
     {
         if (head_requests[j].empty() && tail_requests[j].empty())
             continue;
 
-
+        // 输出当前处理的 Group 进度
         if (j % 10 == 0)
             std::cerr << "[DEBUG] Processing Group Index " << j << "..." << std::endl;
 
-
+        // 排序
         std::sort(head_requests[j].begin(), head_requests[j].end(), [](const auto &a, const auto &b)
                   { return a.strength < b.strength; });
         std::sort(tail_requests[j].begin(), tail_requests[j].end(), [](const auto &a, const auto &b)
@@ -16324,13 +15841,13 @@ void merge_small_contigs_to_groups_final(
 
         contig_chains &target = group_chains[j];
 
-
+        // 备份原始 Group 信息
         std::map<uint32_t, uint32_t> old_positions = target.node_positions;
         uint32_t old_len = target.path_length;
         if (target.haplo_sequences && target.haplo_sequences->length() > 0)
             old_len = target.haplo_sequences->length();
 
-
+        // --- 内存优化：预计算大小 ---
         size_t est_seq_len = old_len;
         size_t est_path_size = target.utg_path_node.size();
         size_t est_info_size = target.contig_info_output.size();
@@ -16341,7 +15858,7 @@ void merge_small_contigs_to_groups_final(
             if (src.haplo_sequences)
                 est_seq_len += src.haplo_sequences->length() + 100;
             else
-                est_seq_len += 100;
+                est_seq_len += 100; // 即使是空序列也有 gap
 
             est_path_size += src.utg_path_node.size();
             est_info_size++;
@@ -16358,13 +15875,13 @@ void merge_small_contigs_to_groups_final(
             est_info_size++;
         }
 
-
-
+        // --- DEBUG: 输出预估大小 ---
+        // 这里可以检查 est_seq_len 是否变得异常大（例如溢出变成很大的正数）
         // std::cerr << "[DEBUG] Group " << j << " Est. Seq Len: " << est_seq_len
         //           << " | Heads: " << head_requests[j].size()
         //           << " | Tails: " << tail_requests[j].size() << std::endl;
 
-
+        // 准备新容器 (带 reserve)
         std::vector<uint32_t> new_utg_path;
         try
         {
@@ -16390,7 +15907,7 @@ void merge_small_contigs_to_groups_final(
         std::string new_sequence = "";
         try
         {
-
+            // +1024 为了安全余量
             new_sequence.reserve(est_seq_len + 1024);
         }
         catch (std::bad_alloc &e)
@@ -16411,7 +15928,7 @@ void merge_small_contigs_to_groups_final(
             const contig_chains_small_contig &src = small_contigs[req.small_idx];
             bool rev = (req.matrix_row_idx % 2 != 0);
 
-
+            // 序列与位置
             std::string s_seq = "";
             if (src.haplo_sequences)
                 s_seq = *(src.haplo_sequences);
@@ -16434,7 +15951,7 @@ void merge_small_contigs_to_groups_final(
                 }
             }
 
-
+            // 检查拼接是否会导致超出 reserve
             if (new_sequence.length() + s_seq.length() + 100 > new_sequence.capacity())
             {
                 std::cerr << "[WARN] new_sequence capacity exceeded in HEAD! " << new_sequence.capacity() << std::endl;
@@ -16442,7 +15959,7 @@ void merge_small_contigs_to_groups_final(
             new_sequence += s_seq + gap_seq;
             global_offset += s_seq.length() + 100;
 
-
+            // 路径
             if (rev)
             {
                 for (auto it = src.utg_path_node.rbegin(); it != src.utg_path_node.rend(); ++it)
@@ -16459,16 +15976,16 @@ void merge_small_contigs_to_groups_final(
 
         // --- PART B: BODY (Original Group) ---
         // std::cerr << "[DEBUG] Processing Body..." << std::endl;
-
+        // 序列
         if (target.haplo_sequences)
             new_sequence += *(target.haplo_sequences);
-
+        // 位置
         for (auto const &[node, pos] : old_positions)
         {
             new_positions[node] = global_offset + pos;
         }
         global_offset += old_len;
-
+        // 路径与信息
         new_utg_path.insert(new_utg_path.end(), target.utg_path_node.begin(), target.utg_path_node.end());
         new_info.insert(new_info.end(), target.contig_info_output.begin(), target.contig_info_output.end());
 
@@ -16511,7 +16028,7 @@ void merge_small_contigs_to_groups_final(
             new_sequence += s_seq;
             global_offset += s_seq.length();
 
-
+            // 路径
             if (rev)
             {
                 for (auto it = src.utg_path_node.rbegin(); it != src.utg_path_node.rend(); ++it)
@@ -16526,11 +16043,11 @@ void merge_small_contigs_to_groups_final(
             new_info.push_back({src.contig_name, !rev});
         }
 
-
+        // --- PART D: 应用更新 ---
         if (target.haplo_sequences)
             delete target.haplo_sequences;
 
-
+        // 尝试分配最终的 string 对象
         try
         {
             target.haplo_sequences = new std::string(std::move(new_sequence));
@@ -16554,7 +16071,7 @@ void merge_small_contigs_to_groups_final(
         std::cerr << "[DEBUG] Finished Group " << j << ": Len=" << target.path_length << std::endl;
     }
 
-
+    // 1. 构建输出目录路径
     std::string out_dir_str = output_directory;
     if (!out_dir_str.empty() && out_dir_str.back() != '/')
     {
@@ -16567,7 +16084,7 @@ void merge_small_contigs_to_groups_final(
     std::ofstream outPhasing(fa_filename);
     std::ofstream outScaffold(txt_filename);
 
-
+    // 检查文件是否成功打开
     if (!outPhasing.is_open())
     {
         std::cerr << "[Error] Failed to open FASTA file for writing: " << fa_filename << std::endl;
@@ -16575,46 +16092,46 @@ void merge_small_contigs_to_groups_final(
     else if (!outScaffold.is_open())
     {
         std::cerr << "[Error] Failed to open TXT file for writing: " << txt_filename << std::endl;
-
+        // 如果 txt 打开失败，可以选择关闭 fa 并退出，或者继续只写 fa
     }
     else
     {
         int valid_count = 0;
         for (const auto &chain : group_chains)
         {
-
+            // 过滤无效的 chain
             if (chain.path_length == 0 || !chain.haplo_sequences || chain.contig_info_output.empty())
             {
                 continue;
             }
 
-
+            // 2. 获取 Scaffold 名字和组件数量
             std::string first_name = chain.contig_info_output[0].first;
             size_t sub_contig_count = chain.contig_info_output.size();
 
-
+            // 构造 Scaffold ID
             std::string scaffold_id = first_name + "_" + std::to_string(sub_contig_count);
 
             // -------------------------------------------------
-
+            // 3. 写入 scaffold.txt (格式: ID:htg1,htg2,htg3)
             // -------------------------------------------------
-            outScaffold << scaffold_id << ":";
+            outScaffold << scaffold_id << ":"; // 写入 ID 和冒号
 
             for (size_t i = 0; i < sub_contig_count; ++i)
             {
-
+                // 写入 contig 名字
                 outScaffold << chain.contig_info_output[i].first;
 
-
+                // 如果不是最后一个元素，则写入逗号隔开
                 if (i < sub_contig_count - 1)
                 {
                     outScaffold << ",";
                 }
             }
-            outScaffold << "\n";
+            outScaffold << "\n"; // 换行
 
             // -------------------------------------------------
-
+            // 4. 写入 phasing_contig.fa (序列信息保持不变)
             // -------------------------------------------------
             outPhasing << ">" << scaffold_id << "\n";
             outPhasing << *(chain.haplo_sequences) << "\n";
@@ -16630,14 +16147,14 @@ void merge_small_contigs_to_groups_final(
 
     std::cerr << "[DEBUG] merge_small_contigs_to_groups_final Completed." << std::endl;
 
-
+    // 1. 构建输出目录路径
     // std::string out_dir_str = output_directory;
     // if (!out_dir_str.empty() && out_dir_str.back() != '/')
     // {
     //     out_dir_str += "/";
     // }
 
-
+    // // 2. 修改文件名为分别输出 hap1 和 hap2
     // std::string fa_hap1_filename = out_dir_str + "phasing_hap1.fa";
     // std::string fa_hap2_filename = out_dir_str + "phasing_hap2.fa";
     // std::string txt_filename1 = out_dir_str + "phasing_contig_hap_name.txt";
@@ -16646,7 +16163,7 @@ void merge_small_contigs_to_groups_final(
     // std::ofstream outPhasingHap2(fa_hap2_filename);
     // std::ofstream outScaffold1(txt_filename1);
 
-
+    // // 检查文件是否成功打开
     // if (!outPhasingHap1.is_open() || !outPhasingHap2.is_open())
     // {
     //     std::cerr << "[Error] Failed to open FASTA files for writing." << std::endl;
@@ -16659,10 +16176,10 @@ void merge_small_contigs_to_groups_final(
     // {
     //     int valid_count = 0;
 
-
+    //     // 遍历您的组装好的 chain
     //     for (const auto &chain : group_chains)
     //     {
-
+    //         // 过滤无效的 chain
     //         if (chain.path_length == 0 || !chain.haplo_sequences || chain.contig_info_output.empty())
     //         {
     //             continue;
@@ -16671,12 +16188,12 @@ void merge_small_contigs_to_groups_final(
     //         std::string first_name = chain.contig_info_output[0].first;
     //         size_t sub_contig_count = chain.contig_info_output.size();
 
-
+    //         // 构造 Scaffold ID
     //         std::string scaffold_id = first_name + "_" + std::to_string(sub_contig_count);
 
     //         outScaffold1 << scaffold_id << ":";
 
-
+    //         // --- 核心逻辑：基于 contig name 进行投票 ---
     //         int hap1_count = 0;
     //         int hap2_count = 0;
 
@@ -16689,8 +16206,8 @@ void merge_small_contigs_to_groups_final(
     //                 outScaffold1 << ",";
     //             }
 
-
-
+    //             // 匹配字符串特征判定是 hap1 还是 hap2
+    //             // （如果您的名称里包含 "h1tg" 也可以在这里改写为 .find("h1") 等）
     //             if (ctg_name.find("hap1") != std::string::npos || ctg_name.find("h1") != std::string::npos)
     //             {
     //                 hap1_count++;
@@ -16702,7 +16219,7 @@ void merge_small_contigs_to_groups_final(
     //         }
     //         outScaffold1 << "\n";
     //         std::string seq_str = chain.haplo_sequences->str();
-
+    //         // --- 根据计票结果分配到对应的输出文件 ---
     //         if (hap1_count >= hap2_count)
     //         {
     //             outPhasingHap1 << ">" << scaffold_id << "_hap1\n";
@@ -16722,11 +16239,11 @@ void merge_small_contigs_to_groups_final(
     //     std::cerr << "[Info] Successfully wrote " << valid_count << " split entries." << std::endl;
     // }
     // =========================================================
-
+    // 新增逻辑：输出 phasing_contig.fa
     // =========================================================
 
-
-
+    // 1. 构建输出文件路径
+    // 注意：需要确保 output_directory 末尾是否有 '/'，为了安全这里手动检查或添加
     // std::string out_dir_str = output_directory;
     // if (!out_dir_str.empty() && out_dir_str.back() != '/')
     // {
@@ -16744,22 +16261,22 @@ void merge_small_contigs_to_groups_final(
     //     int valid_count = 0;
     //     for (const auto &chain : group_chains)
     //     {
-
+    //         // 过滤无效的 chain
     //         if (chain.path_length == 0 || !chain.haplo_sequences || chain.contig_info_output.empty())
     //         {
     //             continue;
     //         }
 
-
+    //         // 2. 获取名字：第一个 contig 的名字
     //         std::string first_name = chain.contig_info_output[0].first;
 
-
-
-
+    //         // 3. 获取 Size：contig_info_output 里的元素个数 (即包含的 contig 数量)
+    //         // 如果你指的是“序列长度”，请用 chain.path_length；
+    //         // 但根据你的描述 "contig_info_output 里的 size"，通常指 vector 的大小
     //         size_t sub_contig_count = chain.contig_info_output.size();
 
-
-
+    //         // 4. 写入 FASTA
+    //         // Header 格式: >Name_Count
     //         outPhasing << ">" << first_name << "_" << sub_contig_count << "\n";
 
     //         // Sequence
@@ -16773,7 +16290,7 @@ void merge_small_contigs_to_groups_final(
     // }
 }
 
-
+// 存储单条 Read 在序列上的比对信息
 struct ReadAlignment
 {
     uint32_t seq_pos;
@@ -16784,11 +16301,11 @@ struct ReadAlignment
 struct GFASeqInfo
 {
     uint32_t length = 0;
-
+    // 使用 read_id -> 比对信息
     std::unordered_map<std::string, ReadAlignment> reads;
 };
 
-
+// 辅助函数：安全地分割字符串
 std::vector<std::string> split(const std::string &s, char delimiter)
 {
     std::vector<std::string> tokens;
@@ -16866,7 +16383,7 @@ void read_contig_csv_1(
         std::cerr << "[Info] CSV file already exists. Skipping GFA parsing and using existing file: "
                   << output_csv_path << std::endl;
         check_file.close();
-        return;
+        return; // 文件存在，直接退出当前函数
     }
     std::unordered_map<std::string, GFASeqInfo> utg_data;
     std::unordered_map<std::string, GFASeqInfo> hap_data;
@@ -16875,7 +16392,7 @@ void read_contig_csv_1(
     parse_single_gfa(hap1_gfa, hap_data);
     parse_single_gfa(hap2_gfa, hap_data);
 
-
+    // 建立 Read -> Haps 的反向索引
     std::unordered_map<std::string, std::vector<std::string>> read_to_haps;
     for (const auto &[hap_id, info] : hap_data)
     {
@@ -16886,13 +16403,13 @@ void read_contig_csv_1(
     }
 
     std::ofstream csv_out(output_csv_path);
-
+    // 完整的 12 列标题
     csv_out << "utg_id,utg_length,utg_start,utg_end,ctg_id,ctg_length,ctg_start,ctg_end,"
             << "shared_reads,same_dir_reads,diff_dir_reads,orientation\n";
 
     for (const auto &[utg_id, u_info] : utg_data)
     {
-
+        // 针对每个相关的 ctg 聚合信息
         std::unordered_map<std::string, MappingStats> pair_stats;
 
         for (const auto &[read_id, u_aln] : u_info.reads)
@@ -16904,13 +16421,13 @@ void read_contig_csv_1(
                     const auto &h_aln = hap_data[hap_id].reads[read_id];
                     auto &stats = pair_stats[hap_id];
 
-
+                    // 收集坐标以计算 Bounding Box
                     stats.utg_starts.push_back(u_aln.seq_pos);
                     stats.utg_ends.push_back(u_aln.seq_pos + u_aln.read_len);
                     stats.ctg_starts.push_back(h_aln.seq_pos);
                     stats.ctg_ends.push_back(h_aln.seq_pos + h_aln.read_len);
 
-
+                    // 投票判定方向
                     if (u_aln.strand == h_aln.strand)
                         stats.same++;
                     else
@@ -16919,13 +16436,13 @@ void read_contig_csv_1(
             }
         }
 
-
+        // 输出该 utg 匹配到的所有 ctg
         for (auto &[hap_id, s] : pair_stats)
         {
             uint32_t u_len = u_info.length;
             uint32_t h_len = hap_data[hap_id].length;
 
-
+            // 计算 Bounding Box (同 Python 的 min/max 逻辑)
             uint32_t u_s = *std::min_element(s.utg_starts.begin(), s.utg_starts.end());
             uint32_t u_e = *std::max_element(s.utg_ends.begin(), s.utg_ends.end());
             uint32_t c_s = *std::min_element(s.ctg_starts.begin(), s.ctg_starts.end());
@@ -16947,70 +16464,70 @@ void read_contig_csv_1(
     csv_out.close();
 }
 
-
+// 1. 定义一个用于存储连接关系的结构体
 struct ConnectionInfo
 {
-    uint32_t c1_idx;
+    uint32_t c1_idx;     // contig1 的 index
     uint32_t c1_end;     // 0: Head, 1: Tail
-    uint32_t c2_idx;
+    uint32_t c2_idx;     // contig2 的 index
     uint32_t c2_end;     // 0: Head, 1: Tail
-    uint32_t max_signal;
-    uint32_t c1_length;
+    uint32_t max_signal; // 最大信号值
+    uint32_t c1_length;  // 用于后续按长度排序
 };
 
 contig_chains reverse_contig(const contig_chains &c, asg_t *graph);
 
-
-contig_chains merge_two_contigs(const contig_chains &c1, uint32_t c1_end, const contig_chains &c2, uint32_t c2_end, asg_t *graph)
+// 修改返回值为 bool，用于通知外层循环是否继续迭代
+contig_chains merge_two_contigs(const contig_chains &c1, uint32_t c1_end, const contig_chains &c2, uint32_t c2_end, asg_t *graph) // <-- 这里新增了 graph 参数
 {
     contig_chains left, right;
 
     // =========================================================
-
-
-
+    // 第一步：方向判定（烧脑区）
+    // 目标：确保最终是 Left 的 Tail 接上 Right 的 Head
+    // 规定：端点 0 代表 Head，端点 1 代表 Tail
     // =========================================================
 
     if (c1_end == 1 && c2_end == 0)
     {
-
-
+        // [情形 A] c1(Tail) 接 c2(Head)
+        // 最理想的顺接：c1 正向在前，c2 正向在后
         left = c1;
         right = c2;
     }
     else if (c1_end == 1 && c2_end == 1)
     {
-
-
-
+        // [情形 B] c1(Tail) 接 c2(Tail)
+        // c1 的尾巴碰到了 c2 的尾巴。
+        // 必须把 c2 整个翻转过来，它的 Tail 就会变成 Head。
         left = c1;
-        right = reverse_contig(c2, graph);
+        right = reverse_contig(c2, graph); // <-- 这里把 graph 传给 reverse_contig
     }
     else if (c1_end == 0 && c2_end == 0)
     {
-
-
-
-        left = reverse_contig(c1, graph);
+        // [情形 C] c1(Head) 接 c2(Head)
+        // 碰头了。我们需要翻转 c1，这样 c1 原来的 Head 就变成了 Tail。
+        // 反转后的 c1 在前，c2 在后。
+        left = reverse_contig(c1, graph); // <-- 这里把 graph 传给 reverse_contig
         right = c2;
     }
     else if (c1_end == 0 && c2_end == 1)
     {
-
-
-
+        // [情形 D] c1(Head) 接 c2(Tail)
+        // c2 的尾巴刚好接到 c1 的头。
+        // 这是一个天然的顺接，只要把 c2 放在前面当 Left，c1 放在后面当 Right 即可，两者都不需要翻转！
         left = c2;
         right = c1;
     }
 
     // =========================================================
-
+    // 第二步：执行属性合并 (Left + 100N + Right)
     // =========================================================
 
     contig_chains merged;
     uint32_t gap_length = 100;
 
-
+    // 1. 合并碱基序列 (插入 100 个 N)
     std::string *new_seq = new std::string();
     if (left.haplo_sequences)
         *new_seq += *(left.haplo_sequences);
@@ -17019,32 +16536,32 @@ contig_chains merge_two_contigs(const contig_chains &c1, uint32_t c1_end, const 
         *new_seq += *(right.haplo_sequences);
     merged.haplo_sequences = new_seq;
 
-
+    // 2. 合并 path_length
     merged.path_length = left.path_length + gap_length + right.path_length;
 
-
+    // 3. 合并 utg_path_node (直接拼接)
     merged.utg_path_node = left.utg_path_node;
     merged.utg_path_node.insert(merged.utg_path_node.end(), right.utg_path_node.begin(), right.utg_path_node.end());
 
-
+    // 4. 合并 contig_info_output (直接拼接)
     merged.contig_info_output = left.contig_info_output;
     merged.contig_info_output.insert(merged.contig_info_output.end(), right.contig_info_output.begin(), right.contig_info_output.end());
 
-
-    merged.node_positions = left.node_positions;
+    // 5. 合并 node_positions (Right 内部的所有 position 需要加上偏移量)
+    merged.node_positions = left.node_positions; // 先复制 left 的
     uint32_t offset = left.path_length + gap_length;
     for (const auto &kv : right.node_positions)
     {
         merged.node_positions[kv.first] = kv.second + offset;
     }
 
-
+    // 6. 基础属性初始化 (Index 和 GroupID 等，通常在调用该函数后由主逻辑赋予)
     merged.beg_node = merged.utg_path_node.front();
     merged.end_node = merged.utg_path_node.back();
+    // merged.index = ... 外部主函数指定
+    // merged.is_paired = ... 外部主函数指定
 
-
-
-
+    // 清理 reverse_contig 产生的临时堆内存 (避免内存泄漏)
     if (c1_end == 1 && c2_end == 1)
     {
         delete right.haplo_sequences;
@@ -17070,7 +16587,7 @@ bool build_scaffolds(std::vector<contig_chains> &contig_chain,
         return false;
     if (round >= 3)
         return false;
-
+    // --- 初始化 Debug 日志文件 (采用追加模式 ios::app) ---
     std::string debug_file_path = output_directory + "/scaffold_debug.log";
     std::ofstream debug_log(debug_file_path, std::ios::app);
 
@@ -17109,7 +16626,7 @@ bool build_scaffolds(std::vector<contig_chains> &contig_chain,
         all_max_signals[i] = global_max;
     }
 
-
+    
     std::vector<uint32_t> valid_signals;
     uint32_t min_noise_floor = 10;
     for (uint32_t sig : all_max_signals)
@@ -17121,7 +16638,7 @@ bool build_scaffolds(std::vector<contig_chains> &contig_chain,
     }
 
     uint32_t base_signal = 0;
-
+    
     double percentile = 0.75;
 
     if (!valid_signals.empty())
@@ -17130,21 +16647,21 @@ bool build_scaffolds(std::vector<contig_chains> &contig_chain,
 
         size_t target_idx = (size_t)(valid_signals.size() * percentile);
 
-
+        
         if (target_idx >= valid_signals.size())
             target_idx = valid_signals.size() - 1;
 
         base_signal = valid_signals[target_idx];
     }
 
-
+    
     uint32_t calculated_threshold = (uint32_t)(base_signal * hic_scaffold_threshold_ratio);
 
-
-    uint32_t absolute_min_threshold = 100;
+    
+    uint32_t absolute_min_threshold = 100; // 根据你的 Hi-C 测序深度调整，低于100对不连
     uint32_t current_threshold = std::max(calculated_threshold, absolute_min_threshold);
 
-
+   
     if (debug_log.is_open())
     {
         debug_log << "\n=================================================================\n";
@@ -17171,7 +16688,7 @@ bool build_scaffolds(std::vector<contig_chains> &contig_chain,
 
     for (const auto &conn : best_connections)
     {
-
+        
         if (conn.max_signal < current_threshold)
             continue;
 
@@ -17181,7 +16698,7 @@ bool build_scaffolds(std::vector<contig_chains> &contig_chain,
         std::string end2_str = (conn.c2_end == 0) ? "Head" : "Tail";
         std::string merge_status = "";
 
-
+        
         bool both_paired = (contig_chain[c1].is_paired && contig_chain[c2].is_paired);
         uint32_t c1_pair = contig_chain[c1].other_index;
         uint32_t c2_pair = contig_chain[c2].other_index;
@@ -17203,7 +16720,7 @@ bool build_scaffolds(std::vector<contig_chains> &contig_chain,
             merge_status = both_paired ? "MERGED (With Pair)" : "MERGED (Single)";
             has_merged = true;
 
-
+           
             contig_chains merged_main = merge_two_contigs(contig_chain[c1], conn.c1_end, contig_chain[c2], conn.c2_end, graph);
             uint32_t new_main_idx = scaffold_chains.size();
             merged_main.index = new_main_idx;
@@ -17236,7 +16753,7 @@ bool build_scaffolds(std::vector<contig_chains> &contig_chain,
             }
         }
 
-
+      
         if (debug_log.is_open())
         {
             debug_log << std::left
@@ -17247,7 +16764,7 @@ bool build_scaffolds(std::vector<contig_chains> &contig_chain,
         }
     }
 
-
+ 
     std::map<uint32_t, uint32_t> old_to_new_index;
     for (int i = 0; i < N; ++i)
     {
@@ -17313,7 +16830,7 @@ std::string reverse_complement_seq(const std::string &seq)
         case 'g':
             c = 'C';
             break;
-
+            // 'N' 或其他字符保持不变
         }
     }
     return rev_seq;
@@ -17323,34 +16840,34 @@ contig_chains reverse_contig(const contig_chains &c, asg_t *graph)
 {
     contig_chains rev_c = c;
 
-
+  
     if (rev_c.haplo_sequences != nullptr)
     {
         std::string *new_seq = new std::string(reverse_complement_seq(*(rev_c.haplo_sequences)));
         rev_c.haplo_sequences = new_seq;
     }
 
-
+  
     std::reverse(rev_c.utg_path_node.begin(), rev_c.utg_path_node.end());
     for (auto &node : rev_c.utg_path_node)
     {
         node ^= 1;
     }
 
-
+  
     std::reverse(rev_c.contig_info_output.begin(), rev_c.contig_info_output.end());
     for (auto &info : rev_c.contig_info_output)
     {
         info.second = !info.second;
     }
 
-
+ 
     std::map<uint32_t, uint32_t> new_positions;
     uint32_t current_pos = 0;
     for (uint32_t node : rev_c.utg_path_node)
     {
         new_positions[node] = current_pos;
-        current_pos += graph->seq[node >> 1].len;
+        current_pos += graph->seq[node >> 1].len; 
     }
     rev_c.node_positions = new_positions;
 
@@ -17358,14 +16875,14 @@ contig_chains reverse_contig(const contig_chains &c, asg_t *graph)
 }
 
 void get_haplotype_path_test_code(
-    uint32_t **connections_foward,
-    uint32_t **connections_backward,
-    asg_t *graph,
+    uint32_t **connections_foward, 
+    uint32_t **connections_backward, 
+    asg_t *graph, 
     map<uint32_t, map<uint32_t, set<uint32_t>>> *bubble_chain_graph,
-    char *output_directory,
-    std::vector<NamedBubbleContig>& named_bubble_contigs,
-    char *gfa_filename,
-    const GlobalParams& g_params)
+    char *output_directory,  
+    std::vector<NamedBubbleContig>& named_bubble_contigs, 
+    char *gfa_filename, 
+    const GlobalParams& g_params) 
 {
 
 
@@ -17404,14 +16921,14 @@ void get_haplotype_path_test_code(
     }
     // print_graph_edges(graph);
     std::unordered_map<std::string, ContigPath> contig_paths;
-    read_contig_csv_1(utg_ctg_file, hap1_gfa, hap2_gfa, utg_gfa);
-    read_contig_csv(utg_ctg_file, hap1_gfa, hap2_gfa, contig_paths);
-    initialize_contig_paths(contig_paths, graph);
+    read_contig_csv_1(utg_ctg_file, hap1_gfa, hap2_gfa, utg_gfa);    // 调用读取函数
+    read_contig_csv(utg_ctg_file, hap1_gfa, hap2_gfa, contig_paths); // 调用读取函数
+    initialize_contig_paths(contig_paths, graph);                    // contig_paths 存入node值
     vector<vector<hap_chain_result_t>> hap_results = hap_results_debug;
     vector<vector<uint32_t>> unvisited_nodes = unvisited_nodes_global;
     match_hap_results_with_contigs(hap_results, unvisited_nodes, contig_paths, graph, connection_count_forward, connection_count_backward, output_directory);
     auto bubble_chain_results = update_bubble_chain_paths(bubble_chains, named_bubble_contigs, graph);
-
+   // 对每个 component 去除 begin-end 相同的重复项
     for (size_t comp = 0; comp < bubble_chain_results.size(); ++comp)
     {
         std::set<std::pair<string, string>> seen_pairs;
@@ -17421,15 +16938,15 @@ void get_haplotype_path_test_code(
         {
             auto key = std::make_pair(graph->seq[bc.begin >> 1].name, graph->seq[bc.end >> 1].name);
             if (seen_pairs.count(key))
-                continue;
+                continue; // 重复，跳过
             seen_pairs.insert(key);
             unique_results.push_back(bc);
         }
 
-
+        // 替换原始数据为去重后的内容
         bubble_chain_results[comp] = std::move(unique_results);
     }
-
+    // // 输出结果进行验证
     // for (size_t comp = 0; comp < bubble_chain_results.size(); ++comp)
     // {
     //     std::cout << ">>> Component " << comp << ":\n";
@@ -17464,7 +16981,7 @@ void get_haplotype_path_test_code(
             std::string fasta_name;
             fasta_name = "contig_" + std::to_string(out_hap_contig_count++) + "_hap" + graph->seq[hap_results[i][j].hap_path[0] >> 1].name;
 
-
+            // 写入 FASTA 格式
             out_hap_contig << ">" << fasta_name << std::endl;
             out_hap_contig << hap_results[i][j].hap_sequence << std::endl;
         }
@@ -17479,7 +16996,7 @@ void get_haplotype_path_test_code(
         }
     }
     out_hap_contig.close();
-
+    
     //..........................................................................................................
     std::vector<std::vector<std::string>> group_contigs(components1.size());
     new_count_step step11;
@@ -17502,44 +17019,44 @@ void get_haplotype_path_test_code(
                        connections_count, components1, output_directory, contig_paths, group_contigs, connection_count_forward, connection_count_backward);
 
     cout << " contig_chain size: " << contig_chain.size() << endl;
-
+    // 步骤1：按 path_length 从长到短排序
     std::vector<size_t> sorted_indices(contig_chain.size());
-    std::iota(sorted_indices.begin(), sorted_indices.end(), 0);
+    std::iota(sorted_indices.begin(), sorted_indices.end(), 0); // 填充0,1,2,...
     std::sort(sorted_indices.begin(), sorted_indices.end(),
               [&contig_chain](size_t i, size_t j)
               {
                   return contig_chain[i].path_length > contig_chain[j].path_length;
               });
 
-
+    // 步骤2：初始化所有链的 group_id_new 为无效值
     for (auto &chain : contig_chain)
     {
-        chain.group_id_new = UINT32_MAX;
+        chain.group_id_new = UINT32_MAX; // 表示未分配新group
     }
 
-
+    // 步骤3：分配新的 group_id
     uint32_t new_group_counter = 0;
     std::vector<bool> processed(contig_chain.size(), false);
 
-
+    // 按长度从长到短处理
     for (size_t idx : sorted_indices)
     {
         auto &chain = contig_chain[idx];
 
-
+        // 如果已经处理过，跳过
         if (processed[idx])
             continue;
 
-
+        // 标记当前链为已处理
         processed[idx] = true;
 
-
+        // 分配新的group_id给当前链
         chain.group_id_new = new_group_counter;
 
-
+        // 检查是否有配对的链
         if (chain.is_paired && chain.other_index != UINT32_MAX)
         {
-
+            // 找到配对链的索引
             uint32_t partner_idx = UINT32_MAX;
             for (size_t i = 0; i < contig_chain.size(); i++)
             {
@@ -17552,7 +17069,7 @@ void get_haplotype_path_test_code(
 
             if (partner_idx != UINT32_MAX && !processed[partner_idx])
             {
-
+                // 分配相同的group_id给配对链
                 contig_chain[partner_idx].group_id_new = new_group_counter;
                 processed[partner_idx] = true;
 
@@ -17563,14 +17080,14 @@ void get_haplotype_path_test_code(
             }
             else
             {
-
+                // 如果配对链已处理或无效，当前链单独一个group
                 std::cerr << "New group " << new_group_counter << ": Chain " << chain.index
                           << " (len: " << chain.path_length << " bp) alone" << std::endl;
             }
         }
         else
         {
-
+            // 没有配对的链，单独一个group
             std::cerr << "New group " << new_group_counter << ": Chain " << chain.index
                       << " (len: " << chain.path_length << " bp) alone" << std::endl;
         }
@@ -17583,9 +17100,9 @@ void get_haplotype_path_test_code(
               {
                   if (a.group_id_new != b.group_id_new)
                   {
-                      return a.group_id_new < b.group_id_new;
+                      return a.group_id_new < b.group_id_new; // 先按 group_id_new 升序
                   }
-
+                  // group_id_new 相同，按 path_length 降序
                   return a.path_length > b.path_length;
               });
 
@@ -17605,12 +17122,12 @@ void get_haplotype_path_test_code(
         std::cerr << "  Paired with chain index: "
                   << (chain.other_index != UINT32_MAX ? std::to_string(chain.other_index) : "NONE") << std::endl;
 
-
+        // 节点信息
         std::cerr << "  Begin node: " << chain.beg_node << std::endl;
         std::cerr << "  End node: " << chain.end_node << std::endl;
         std::cerr << "  Path length: " << chain.path_length << " bp" << std::endl;
 
-
+        // UTG路径节点
         std::cerr << "  UTG path nodes (" << chain.utg_path_node.size() << " nodes): ";
         for (size_t j = 0; j < std::min((size_t)10, chain.utg_path_node.size()); j++)
         {
@@ -17626,7 +17143,7 @@ void get_haplotype_path_test_code(
         }
         std::cerr << std::endl;
 
-
+        // 节点位置信息
         if (!chain.node_positions.empty())
         {
             std::cerr << "  Node positions (first " << std::min((size_t)3, chain.node_positions.size()) << "): ";
@@ -17648,7 +17165,7 @@ void get_haplotype_path_test_code(
             std::cerr << std::endl;
         }
 
-
+        // Contig信息输出
         if (!chain.contig_info_output.empty())
         {
             std::cerr << "  Contig info (" << chain.contig_info_output.size() << " contigs): ";
@@ -17669,7 +17186,7 @@ void get_haplotype_path_test_code(
             std::cerr << std::endl;
         }
         // cerr<<"17135"<<endl;
-
+        //  // 序列信息（如果有）
         //  if (chain.haplo_sequences != nullptr)
         //  {
         //      std::cerr << "  Sequence: "
@@ -17681,7 +17198,7 @@ void get_haplotype_path_test_code(
 
     std::cout << "\n=== Summary ===" << std::endl;
 
-
+    // 统计配对情况
     uint32_t paired_count = 0;
     uint32_t unpaired_count = 0;
     for (const auto &chain : contig_chain)
@@ -17699,7 +17216,7 @@ void get_haplotype_path_test_code(
     std::cout << "Paired chains: " << paired_count << std::endl;
     std::cout << "Unpaired chains: " << unpaired_count << std::endl;
 
-
+    // 统计链长度分布
     if (!contig_chain.empty())
     {
         uint32_t min_length = UINT32_MAX;
@@ -17744,37 +17261,37 @@ void get_haplotype_path_test_code(
     //***********************small contig*****************************************   */
     cout << "unvisited_contigs (Scaffolding small contigs into individual HTGs within main contigs)..." << endl;
 
-
+    // 1. 预先将主 contig (contig_chain) 按 group_id_new 分类，以加速查找
     map<uint32_t, vector<uint32_t>> group_to_main_contigs;
     for (uint32_t i = 0; i < contig_chain.size(); i++)
     {
         group_to_main_contigs[contig_chain[i].group_id_new].push_back(i);
     }
 
-
+    // 定义结构体用于记录打散后的 htg 节点来源，方便后续定点插入
     struct HtgRef
     {
-        uint32_t orig_idx;
-        uint32_t sub_idx;
-        bool is_forward;
+        uint32_t orig_idx; // 来源于哪条主 contig (contig_chain 的索引)
+        uint32_t sub_idx;  // 位于 contig_info_output 的具体索引位置
+        bool is_forward;   // 该 htg 在躯干中的相对方向
     };
 
     struct Insertion
     {
         uint32_t orig_idx;
-        uint32_t insert_pos;
+        uint32_t insert_pos; // 计划插入的 contig_info_output 索引位置
         string small_name;
-        bool is_forward;
+        bool is_forward; // 插入时的相对方向
         uint32_t small_idx;
         uint32_t score;
     };
 
-
+    // 2. 对每一个 group 内部重新进行 scaffold
     for (size_t g_idx = 0; g_idx < group_contigs.size(); ++g_idx)
     {
         const auto &group = group_contigs[g_idx];
 
-
+        // 分别存放该 group 内的 h1 和 h2 small contig
         vector<string> unvisited_h1;
         vector<string> unvisited_h2;
 
@@ -17782,7 +17299,7 @@ void get_haplotype_path_test_code(
         {
             if (visited_set.find(contig_name) == visited_set.end())
             {
-
+                // 根据名字分配单倍型
                 if (contig_name.find("h1tg") != string::npos || contig_name.find("hap1") != string::npos)
                 {
                     unvisited_h1.push_back(contig_name);
@@ -17793,25 +17310,25 @@ void get_haplotype_path_test_code(
                 }
                 else
                 {
-
+                    // 若无法分辨单倍型，放入双边尝试
                     unvisited_h1.push_back(contig_name);
                     unvisited_h2.push_back(contig_name);
                 }
             }
         }
 
-
+        // 3. 对 h1 和 h2 单倍型独立进行：提取独立 HTG 节点、矩阵计算、决定插入点
         for (int hap = 1; hap <= 2; ++hap)
         {
             vector<string> &current_unvisited = (hap == 1) ? unvisited_h1 : unvisited_h2;
             if (current_unvisited.empty())
-                continue;
+                continue; // 没有 small contig 跳过
 
             count_step_small_contig cstep_small_contig;
             cstep_small_contig.contig_chains_ptr_small = new std::vector<contig_chains_small_contig>();
             vector<contig_chains_small_contig> small_contig;
 
-
+            // 构造当前组/单倍型的 small contig 链
             for (uint32_t i = 0; i < current_unvisited.size(); i++)
             {
                 std::string contig_name = current_unvisited[i];
@@ -17845,9 +17362,9 @@ void get_haplotype_path_test_code(
                 continue;
             }
 
-
+            // --- 核心改动：打散主躯干，将每个 htg 作为单独的节点 ---
             vector<contig_chains> local_main_htgs;
-            vector<HtgRef> local_main_refs;
+            vector<HtgRef> local_main_refs; // 记录对应的躯干和索引位置
 
             auto it_main = group_to_main_contigs.find(g_idx);
             if (it_main != group_to_main_contigs.end())
@@ -17855,7 +17372,7 @@ void get_haplotype_path_test_code(
                 for (uint32_t orig_idx : it_main->second)
                 {
                     bool is_h1 = false, is_h2 = false;
-
+                    // 通过第一个序列名来判断这条躯干的单倍型
                     if (!contig_chain[orig_idx].contig_info_output.empty())
                     {
                         const string &firstName = contig_chain[orig_idx].contig_info_output.front().first;
@@ -17867,7 +17384,7 @@ void get_haplotype_path_test_code(
 
                     if ((hap == 1 && is_h1) || (hap == 2 && is_h2) || (!is_h1 && !is_h2))
                     {
-
+                        // 遍历主躯干内的每一条 htg，单独构造 contig_chains
                         for (size_t sub_idx = 0; sub_idx < contig_chain[orig_idx].contig_info_output.size(); ++sub_idx)
                         {
                             const auto &htg_info = contig_chain[orig_idx].contig_info_output[sub_idx];
@@ -17886,7 +17403,7 @@ void get_haplotype_path_test_code(
                                 }
 
                                 local_main_htgs.push_back(htg_chain);
-
+                                // 保存引用映射，用于反向插入
                                 local_main_refs.push_back({orig_idx, (uint32_t)sub_idx, htg_forward});
                             }
                         }
@@ -17897,7 +17414,7 @@ void get_haplotype_path_test_code(
             if (local_main_htgs.empty())
             {
                 delete cstep_small_contig.contig_chains_ptr_small;
-                continue;
+                continue; // 该分支下没有可用的目标节点
             }
 
             cstep_small_contig.contig_chains_ptr = &local_main_htgs;
@@ -17907,7 +17424,7 @@ void get_haplotype_path_test_code(
             std::cerr << "Group " << g_idx << " Hap " << hap << " matrix: "
                       << m << " small contigs × " << n << " individual HTGs" << std::endl;
 
-
+            // 4. 分配连接度矩阵内存
             uint32_t **connect_small = (uint32_t **)calloc(m * 2, sizeof(uint32_t *));
             for (size_t i = 0; i < m * 2; i++)
             {
@@ -17920,7 +17437,7 @@ void get_haplotype_path_test_code(
 
             kt_for(n_threads, counter_worker_single_step_small_contig, &cstep_small_contig, m);
 
-
+            // 5. 归一化得分 (Normalization)
             // if (enzymes.size() == 0)
             // {
                 for (int i = 0; i < m * 2; i++)
@@ -17943,11 +17460,11 @@ void get_haplotype_path_test_code(
             // }
 
             uint32_t small_threshold = calculate_dynamic_threshold(connect_small, m, n);
-
+            // 依然输出阈值供参考，但不使用它进行过滤
             cerr << "Group " << g_idx << " Hap " << hap << " calculated threshold: " << small_threshold
                  << " (Ignored, mapping purely by highest signal > 0)" << endl;
 
-
+            // 临时结构体：用于收集所有 >0 的最强连接，方便全局排序
             struct Candidate
             {
                 int i;
@@ -17958,7 +17475,7 @@ void get_haplotype_path_test_code(
             };
             vector<Candidate> candidates;
 
-
+            // 6. 遍历寻找每个 small contig 的最强 HTG 缝隙信号
             for (int i = 0; i < m; ++i)
             {
                 uint32_t best_j = -1, max_conn = 0, best_dir_i = 0, best_dir_j = 0;
@@ -17970,7 +17487,7 @@ void get_haplotype_path_test_code(
                         for (int dir_j = 0; dir_j < 2; ++dir_j)
                         {
                             uint32_t conn = connect_small[(i << 1) + dir_i][(j << 1) + dir_j];
-
+                            // 只要信号比当前记录的大，就更新（不再比较 threshold）
                             if (conn > max_conn)
                             {
                                 max_conn = conn;
@@ -17982,25 +17499,25 @@ void get_haplotype_path_test_code(
                     }
                 }
 
-
+                // 只要最终的信号强度 > 0，就视为有效的拼接候选
                 if (max_conn > 0 && best_j != (uint32_t)-1)
                 {
                     candidates.push_back({i, best_j, best_dir_i, best_dir_j, max_conn});
                 }
             }
 
-
+            // 按照信号强度 (max_conn) 从强到弱进行全局排序
             sort(candidates.begin(), candidates.end(), [](const Candidate &a, const Candidate &b)
                  { return a.max_conn > b.max_conn; });
 
             vector<Insertion> planned_insertions;
 
-
+            // 根据从强到弱的顺序，转化为具体的插入动作
             for (const auto &cand : candidates)
             {
                 HtgRef ref = local_main_refs[cand.best_j];
 
-
+                // 判断 small contig 应插入该 htg 的前面还是后面
                 bool insert_before = false;
                 if (ref.is_forward)
                 {
@@ -18012,7 +17529,7 @@ void get_haplotype_path_test_code(
                 }
                 uint32_t insert_pos = ref.sub_idx + (insert_before ? 0 : 1);
 
-
+                // 判断该 small contig 插入后的实际方向
                 bool same_orientation = (cand.best_dir_i != cand.best_dir_j);
                 bool small_is_forward = ref.is_forward ? same_orientation : !same_orientation;
 
@@ -18022,11 +17539,11 @@ void get_haplotype_path_test_code(
                     small_contig[cand.i].contig_name,
                     small_is_forward,
                     (uint32_t)cand.i,
-                    cand.max_conn
+                    cand.max_conn // 记录得分
                 });
             }
 
-
+            // 7. 在组装主躯干内完成所有计划的插入，并重构原始 UTG 节点路径
             map<uint32_t, vector<Insertion>> insertions_by_orig;
             for (const auto &ins : planned_insertions)
             {
@@ -18038,11 +17555,11 @@ void get_haplotype_path_test_code(
                 uint32_t orig_idx = pair.first;
                 auto &ins_list = pair.second;
 
-
+                // 重点：一定要根据 insert_pos 进行降序排序！从后向前插入才不会让前面的插入干扰后面的坐标位置
                 sort(ins_list.begin(), ins_list.end(), [](const Insertion &a, const Insertion &b)
                      { return a.insert_pos > b.insert_pos; });
 
-
+                // a. 写入 Contig Info
                 for (const auto &ins : ins_list)
                 {
                     contig_chain[orig_idx].contig_info_output.insert(
@@ -18050,9 +17567,9 @@ void get_haplotype_path_test_code(
                         {ins.small_name, ins.is_forward});
                 }
 
-
+                // b. 依据更新完毕带有 small_contig 的 contig_info_output，彻底刷新这根主躯干的 UTG Path 及其内部坐标！
                 contig_chain[orig_idx].utg_path_node.clear();
-                contig_chain[orig_idx].node_positions.clear();
+                contig_chain[orig_idx].node_positions.clear(); // 【修复核心】必须清空旧坐标表，重新映射
                 contig_chain[orig_idx].path_length = 0;
 
                 for (const auto &info : contig_chain[orig_idx].contig_info_output)
@@ -18060,28 +17577,28 @@ void get_haplotype_path_test_code(
                     auto it_path = contig_paths.find(info.first);
                     if (it_path != contig_paths.end())
                     {
-                        uint32_t current_offset = contig_chain[orig_idx].path_length;
+                        uint32_t current_offset = contig_chain[orig_idx].path_length; // 当前 htg/small_contig 在全局躯干中的起算位置
 
                         if (info.second)
-                        {
+                        { // 该节点正接
                             for (size_t k = 0; k < it_path->second.utg_nodes.size(); ++k)
                             {
                                 uint32_t utg = it_path->second.utg_nodes[k];
                                 contig_chain[orig_idx].utg_path_node.push_back(utg);
 
-
+                                // 写入新坐标: 之前躯干累计总长 + 节点在当前小段内的相对起点
                                 contig_chain[orig_idx].node_positions[utg] = current_offset + it_path->second.utg_starts[k];
                             }
                         }
                         else
-                        {
+                        { // 该节点反接，必须逆向遍历 UTG 并且对 UTG 的方向标记位进行异或翻转 (^1)
                             for (size_t k = 0; k < it_path->second.utg_nodes.size(); ++k)
                             {
-                                size_t rev_k = it_path->second.utg_nodes.size() - 1 - k;
+                                size_t rev_k = it_path->second.utg_nodes.size() - 1 - k; // 逆向索引
                                 uint32_t utg = it_path->second.utg_nodes[rev_k] ^ 1;
                                 contig_chain[orig_idx].utg_path_node.push_back(utg);
 
-
+                                // 反接时的近似坐标记录
                                 uint32_t rev_pos = current_offset + (it_path->second.ctg_length - it_path->second.utg_starts[rev_k]);
                                 contig_chain[orig_idx].node_positions[utg] = rev_pos;
                             }
@@ -18091,7 +17608,7 @@ void get_haplotype_path_test_code(
                 }
             }
 
-
+            // 清理这一轮产生的动态分配内存
             for (size_t i = 0; i < m * 2; i++)
             {
                 free(connect_small[i]);
@@ -18102,10 +17619,6 @@ void get_haplotype_path_test_code(
     }
 
     if (!split_flagged_chains(contig_chain, contig_paths, g_params))
-        return;
-    if (!auto_correct_chains(contig_chain, contig_paths,
-                             connection_count_forward, connection_count_backward,
-                             string(output_directory), g_params))
         return;
 
     std::cout << "\n=== Contig Chain new Information ===" << std::endl;
@@ -18124,12 +17637,12 @@ void get_haplotype_path_test_code(
         std::cerr << "  Paired with chain index: "
                   << (chain.other_index != UINT32_MAX ? std::to_string(chain.other_index) : "NONE") << std::endl;
 
-
+        // 节点信息
         std::cerr << "  Begin node: " << chain.beg_node << std::endl;
         std::cerr << "  End node: " << chain.end_node << std::endl;
         std::cerr << "  Path length: " << chain.path_length << " bp" << std::endl;
 
-
+        // UTG路径节点
         std::cerr << "  UTG path nodes (" << chain.utg_path_node.size() << " nodes): ";
         for (size_t j = 0; j < std::min((size_t)10, chain.utg_path_node.size()); j++)
         {
@@ -18145,7 +17658,7 @@ void get_haplotype_path_test_code(
         }
         std::cerr << std::endl;
 
-
+        // 节点位置信息
         if (!chain.node_positions.empty())
         {
             std::cerr << "  Node positions (first " << std::min((size_t)3, chain.node_positions.size()) << "): ";
@@ -18167,7 +17680,7 @@ void get_haplotype_path_test_code(
             std::cerr << std::endl;
         }
 
-
+        // Contig信息输出
         if (!chain.contig_info_output.empty())
         {
             std::cerr << "  Contig info (" << chain.contig_info_output.size() << " contigs): ";
@@ -18188,7 +17701,7 @@ void get_haplotype_path_test_code(
             std::cerr << std::endl;
         }
         // cerr<<"17135"<<endl;
-
+        //  // 序列信息（如果有）
         //  if (chain.haplo_sequences != nullptr)
         //  {
         //      std::cerr << "  Sequence: "
@@ -18215,7 +17728,7 @@ void get_haplotype_path_test_code(
     std::ofstream outPhasingHap2(fa_hap2_filename);
     std::ofstream outScaffold1(txt_filename1);
 
-
+    // 检查文件是否成功打开
     if (!outPhasingHap1.is_open() || !outPhasingHap2.is_open())
     {
         std::cerr << "[Error] Failed to open FASTA files for writing." << std::endl;
@@ -18228,10 +17741,10 @@ void get_haplotype_path_test_code(
     {
         int valid_count = 0;
 
-
+        // 遍历您的组装好的 chain
         for (const auto &chain : contig_chain)
         {
-
+            // 过滤无效的 chain
             if (chain.path_length == 0 || !chain.haplo_sequences || chain.contig_info_output.empty())
             {
                 continue;
@@ -18240,12 +17753,12 @@ void get_haplotype_path_test_code(
             std::string first_name = chain.contig_info_output[0].first;
             size_t sub_contig_count = chain.contig_info_output.size();
 
-
+            // 构造 Scaffold ID
             std::string scaffold_id = first_name + "_" + std::to_string(sub_contig_count);
 
             outScaffold1 << scaffold_id << ":";
 
-
+            // --- 核心逻辑：基于 contig name 进行投票 ---
             int hap1_count = 0;
             int hap2_count = 0;
 
@@ -18258,8 +17771,8 @@ void get_haplotype_path_test_code(
                     outScaffold1 << ",";
                 }
 
-
-
+                // 匹配字符串特征判定是 hap1 还是 hap2
+                // （如果您的名称里包含 "h1tg" 也可以在这里改写为 .find("h1") 等）
                 if (ctg_name.find("hap1") != std::string::npos || ctg_name.find("h1") != std::string::npos)
                 {
                     hap1_count++;
@@ -18271,7 +17784,7 @@ void get_haplotype_path_test_code(
             }
             outScaffold1 << "\n";
             std::string seq_str = *(chain.haplo_sequences);
-
+            // --- 根据计票结果分配到对应的输出文件 ---
             if (hap1_count >= hap2_count)
             {
                 outPhasingHap1 << ">" << scaffold_id << "_hap1\n";
@@ -18299,7 +17812,7 @@ void get_haplotype_path_test_code(
     outFileFiltered2.open(string(output_directory) + string("/scaffold.fa"), ofstream::out | ofstream::trunc);
     ofstream outFileFiltered3;
 
-
+    // 1. 创建包含所有已访问 Contig 的汇总集合
     std::unordered_set<std::string> all_visited_set;
     for (const auto &name : visited_contigs_in_hap)
     {
@@ -18312,25 +17825,25 @@ void get_haplotype_path_test_code(
 
     std::cout << "Starting to process unvisited contigs..." << std::endl;
 
-
+    // 统计变量
     int unvisited_total_count = 0;
     int exported_to_fa_count = 0;
-    int added_to_chain_count = 0;
+    int added_to_chain_count = 0; // 新增：记录加入到 contig_chain 的超大节点数
     uint64_t total_unvisited_len = 0;
 
     std::string unvisited_txt_path = std::string(output_directory) + "/un_visited_contig.txt";
     std::ofstream outUnvisitedTxt(unvisited_txt_path);
 
-
+    // 2. 遍历全集寻找未访问的 Contig
     for (const auto &it : contig_paths)
     {
         const std::string &contig_name = it.first;
         const auto &contig_info = it.second;
 
-
+        // 3. 检查是否未访问
         if (all_visited_set.find(contig_name) == all_visited_set.end())
         {
-
+            // 防御性检查：序列是否为空？
             std::string sequence = contig_info.ctg_seq;
             if (sequence.empty())
             {
@@ -18338,7 +17851,7 @@ void get_haplotype_path_test_code(
                 continue;
             }
 
-
+            // 记录到 txt 和统计
             if (unvisited_total_count > 0)
             {
                 outUnvisitedTxt << ",";
@@ -18348,50 +17861,50 @@ void get_haplotype_path_test_code(
             total_unvisited_len += contig_info.ctg_length;
 
             // =====================================================================================
-
+            // [分支 A]：长度 > 12M，加入到 contig_chain，参与后续迭代合并
             // =====================================================================================
             if (contig_info.ctg_length > g_params.chain_len_threshold)
             {
                 contig_chains new_chain;
-
-
-                new_chain.index = contig_chain.size();
-
-
-                new_chain.other_index = 0xFFFFFFFF;
+                
+                // 分配全新的自增 Index
+                new_chain.index = contig_chain.size(); 
+                
+                // 这些是独立的 scaffold，没有同源染色体配对关系，标记为无效或不配对
+                new_chain.other_index = 0xFFFFFFFF; // 使用极大值表示无 pair
                 new_chain.is_paired = false;
-
-
+                
+                // 记录长度
                 new_chain.path_length = contig_info.ctg_length;
-
-
+                
+                // 🔴 关键点：动态分配内存保存碱基序列，防止局部变量销毁导致野指针
                 new_chain.haplo_sequences = new string(sequence);
-
-
+                
+                // 记录它的物理组成（它目前只由自己组成，方向为正）
                 new_chain.contig_info_output.push_back({contig_name, true});
-
-
-                new_chain.beg_node = 0;
+                
+                // 默认初始化其他不需要强依赖的字段
+                new_chain.beg_node = 0; 
                 new_chain.end_node = 0;
                 new_chain.group_id = 0;
                 new_chain.group_id_new = 0;
 
-
+                // 压入全局 chain 向量中
                 contig_chain.push_back(new_chain);
-
-                std::cerr << "[Info] Super Contig " << contig_name << " (len: " << contig_info.ctg_length
+                
+                std::cerr << "[Info] Super Contig " << contig_name << " (len: " << contig_info.ctg_length 
                           << ") > 12M, added to contig_chain as index " << new_chain.index << ".\n";
                 added_to_chain_count++;
             }
             // =====================================================================================
-
+            // [分支 B]：长度介于 300K 和 12M 之间，不再参与组装，直接输出到 scaffold.fa
             // =====================================================================================
             else if (contig_info.ctg_length > g_params.scaffold_len_threshold)
             {
                 outFileFiltered2 << ">" << contig_name << "\n";
                 outFileFiltered2 << sequence << "\n";
                 // std::cerr << contig_name << " , in scaffold.fa and length is " << contig_info.ctg_length << "\n";
-                exported_to_fa_count++;
+                exported_to_fa_count++; 
             }
         }
     }
@@ -18402,6 +17915,7 @@ void get_haplotype_path_test_code(
 
 
 
+    //** 建立contig_chain hic 信号矩阵 */
     uint32_t **connect_num11;
     connect_num11 = (uint32_t **)calloc(contig_chain.size() * 2, sizeof(uint32_t *));
     for (size_t i = 0; i < contig_chain.size() * 2; i++)
@@ -18481,9 +17995,9 @@ void get_haplotype_path_test_code(
     // }
     // outFileScaffoldSimple.close();
 
-
+    // 收集所有的contig名称（去重）
     std::vector<std::string> contig_names;
-    for (int i = 0; i < contig_chain.size() * 2; i += 2)
+    for (int i = 0; i < contig_chain.size() * 2; i += 2) // 每2个一组（+和-）
     {
         const auto &chain = contig_chain[i >> 1];
         if (contig_chain[i >> 1].contig_info_output.size() > 0)
@@ -18496,26 +18010,26 @@ void get_haplotype_path_test_code(
         }
     }
 
-    int num_contigs_with_direction = contig_names.size();
+    int num_contigs_with_direction = contig_names.size(); // 这是 n*2（正负方向都包括）
     std::vector<std::vector<uint32_t>> connection_matrix(num_contigs_with_direction,
                                                          std::vector<uint32_t>(num_contigs_with_direction, 0));
 
-
+    // 写入矩阵数据
     for (int row = 0; row < num_contigs_with_direction; row++)
     {
 
         for (int col = 0; col < num_contigs_with_direction; col++)
         {
-
-
+            // 获取连接强度
+            // 注意：经过上面的处理后，只有i为偶数（+方向）的位置有值
             uint32_t strength = connect_num11[row][col];
             connection_matrix[row][col] = strength;
         }
     }
-
-
+    // // 输出详细的对信息（可选）
+    // for (int i = 0; i < len * 4; i += 2) // 只考虑+方向
     // {
-
+    //     for (int j = 0; j < len * 4; j += 2) // 只考虑+方向
     //     {
     //         if (connect_num[i][j] > 0)
     //         {
@@ -18534,13 +18048,13 @@ void get_haplotype_path_test_code(
     // outFileScaffold_1.close();
     // cout << "Scaffold connection matrix saved to scaffold_connection.txt" << endl;
 
-
+    // 第二部分：输出过滤后的连接
     ofstream outFileFiltered;
     outFileFiltered.open(string(output_directory) + string("/scaffold_connection_filter.txt"),
                          ofstream::out | ofstream::trunc);
 
-
-
+    // ================= 修改开始 =================
+    // 不再向文件中写入庞大的 N x N 稠密矩阵，而是直接在终端/标准输出打印稀疏连接对
 
     std::cout << "\n=== Sparse Connection Matrix (Connections > 5000) ===" << std::endl;
     std::cout << "Contig1\tContig2\tStrength" << std::endl;
@@ -18551,7 +18065,7 @@ void get_haplotype_path_test_code(
         for (int col = 0; col < num_contigs_with_direction; col++)
         {
             uint32_t strength = connection_matrix[row][col];
-
+            // 只打印有效连接，自动过滤掉大量的 0
             if (strength > 50)
             {
                 // std::cout << contig_names[row] << "\t"
@@ -18564,9 +18078,9 @@ void get_haplotype_path_test_code(
     std::cout << "Total valid sparse connections printed: " << printed_count << std::endl;
     std::cout << "=====================================================\n"
               << std::endl;
+    // ================= 修改结束 =================
 
-
-
+    // 输出过滤后的详细对信息
     outFileFiltered << "\n\nFiltered Detailed Pair Information (All connections):\n";
     outFileFiltered << "Contig1\tContig2\tStrength\tDirection1\tDirection2\n";
 
@@ -18576,14 +18090,14 @@ void get_haplotype_path_test_code(
     uint32_t min_strength = UINT32_MAX;
     int above_threshold = 0;
 
-
+    // 第一次遍历：输出所有连接并收集统计信息
     for (int i = 0; i < num_contigs_with_direction; i++)
     {
         for (int j = 0; j < num_contigs_with_direction; j++)
         {
             uint32_t strength = connect_num11[i][j];
 
-
+            // 统计信息
             total_strength += strength;
             if (strength > max_strength)
                 max_strength = strength;
@@ -18592,15 +18106,15 @@ void get_haplotype_path_test_code(
             if (strength > 5000)
                 above_threshold++;
 
-
+            // 输出所有连接
             string name_i = contig_names[i];
             string name_j = contig_names[j];
 
-
+            // 提取方向信息
             string dir_i = name_i.substr(name_i.size() - 1);
             string dir_j = name_j.substr(name_j.size() - 1);
 
-
+            // 去掉方向后缀的基础名称
             string base_name_i = name_i.substr(0, name_i.size() - 1);
             string base_name_j = name_j.substr(0, name_j.size() - 1);
 
@@ -18612,7 +18126,7 @@ void get_haplotype_path_test_code(
 
             strong_connections++;
 
-
+            // 每输出10000条记录刷新一次
             if (strong_connections % 10000 == 0)
             {
                 outFileFiltered.flush();
@@ -18623,7 +18137,7 @@ void get_haplotype_path_test_code(
 
     outFileFiltered.flush();
 
-
+    // 输出统计信息
     outFileFiltered << "\n\n=== Connection Statistics ===\n";
     outFileFiltered << "Total connections: " << strong_connections << "\n";
     outFileFiltered << "Total connection strength: " << total_strength << "\n";
@@ -18633,21 +18147,21 @@ void get_haplotype_path_test_code(
     outFileFiltered << "Connections with strength > 5000: " << above_threshold << "\n";
     outFileFiltered << "Percentage above threshold: " << (strong_connections > 0 ? (double)above_threshold * 100 / strong_connections : 0) << "%\n";
 
-
+    // 现在输出前N个最强的连接
 
     outFileFiltered << "Rank\tContig1\tContig2\tStrength\tDirection1\tDirection2\n";
 
-
+    // 使用vector来存储和排序
     vector<pair<uint32_t, pair<int, int>>> top_connections; // (strength, (i, j))
 
-
+    // 收集所有连接
     for (int i = 0; i < num_contigs_with_direction; i++)
     {
         for (int j = 0; j < num_contigs_with_direction; j++)
         {
             uint32_t strength = connect_num11[i][j];
             if (strength > 0)
-            {
+            { // 只考虑有连接的
                 top_connections.push_back({strength, {i, j}});
             }
         }
@@ -18655,7 +18169,7 @@ void get_haplotype_path_test_code(
 
     cerr << "Total non-zero connections found: " << top_connections.size() << endl;
 
-
+    // 使用nth_element进行部分排序，效率更高
     if (top_connections.size() > 100)
     {
         nth_element(top_connections.begin(),
@@ -18663,18 +18177,18 @@ void get_haplotype_path_test_code(
                     top_connections.end(),
                     greater<pair<uint32_t, pair<int, int>>>());
 
-
+        // 对前TOP_N个进行完整排序
         sort(top_connections.begin(), top_connections.end(),
              greater<pair<uint32_t, pair<int, int>>>());
     }
     else
     {
-
+        // 如果总数少于TOP_N，直接排序
         sort(top_connections.begin(), top_connections.end(),
              greater<pair<uint32_t, pair<int, int>>>());
     }
 
-
+    // 输出前N个最强的连接
     int rank = 1;
     for (const auto &conn : top_connections)
     {
@@ -18708,21 +18222,21 @@ void get_haplotype_path_test_code(
     int chr_n = 23;
     outFileFiltered << "Chromosome\tContig1\tContig2\tStrength\tDirection1\tDirection2\tGroupID\n";
 
+    // TODO: 收缩矩阵
 
-
-
+   
     outFileFiltered3.open(string(output_directory) + string("/scaffold_contig.txt"), ofstream::out | ofstream::trunc);
-
+    // 定义目标数量：nchr * 2 - 4 (考虑到正负方向)
     int target_limit = n_chrs * 2 - 4;
     int current_count = num_contigs_with_direction;
 
-    outFileFiltered << "\n--- Clustering and merge decision statistics ---\n";
-    outFileFiltered << "Total oriented nodes: " << current_count << ", target: " << target_limit << "\n";
+    outFileFiltered << "\n--- 聚类与合并决策统计 ---\n";
+    outFileFiltered << "当前方向节点总数: " << current_count << ", 目标阈值: " << target_limit << "\n";
 
     // ========================================================================
-
+    // 新增步骤：计算动态阈值 (Dynamic Threshold Calculation)
     // ========================================================================
-    double threshold_ratio = 0.2;
+    double threshold_ratio = 0.2; // 系数，可调整
     uint32_t dynamic_threshold = 0;
 
     {
@@ -18741,7 +18255,7 @@ void get_haplotype_path_test_code(
                     current_max = connect_num11[i][j];
                 }
             }
-
+            // 只有当该节点有信号时才计入平均
             if (current_max > 0)
             {
                 sum_max_signals += current_max;
@@ -18754,36 +18268,36 @@ void get_haplotype_path_test_code(
             double avg_max_signal = (double)sum_max_signals / count_valid_nodes;
             dynamic_threshold = (uint32_t)(avg_max_signal * hic_scaffold_threshold_ratio);
 
-
-            outFileFiltered << "Dynamic threshold: average maximum signal=" << avg_max_signal
-                            << ", ratio=" << hic_scaffold_threshold_ratio
-                            << ", threshold=" << dynamic_threshold << "\n";
+            // 输出计算结果供参考
+            outFileFiltered << "动态阈值计算: 平均最大信号=" << avg_max_signal
+                            << ", 系数=" << hic_scaffold_threshold_ratio
+                            << ", 最终阈值=" << dynamic_threshold << "\n";
             std::cout << "[Info] Dynamic Threshold: " << dynamic_threshold << std::endl;
         }
         else
         {
-            outFileFiltered << "Warning: no valid matrix signal; threshold set to 0\n";
+            outFileFiltered << "警告: 矩阵中无有效信号，阈值设为 0\n";
         }
     }
     // ========================================================================
 
     if (current_count <= target_limit)
     {
+        // 情况 A: 数量不足，需要利用 small contig 聚类（这里由于你没给出 small contig 的具体结构，仅输出逻辑占位）
+        outFileFiltered << "决策: [情况 A] 节点数少于目标，启动 Small Contig 聚类逻辑...\n";
 
-        outFileFiltered << "Decision A: node count is within target; starting small-contig clustering.\n";
-
-        outFileFiltered << "\nMerging completed; writing final scaffolds.\n";
+        outFileFiltered << "\n合并结束，开始输出最终 Scaffold...\n";
         int scaffold_count = 0;
         for (int i = 0; i < contig_chain.size(); ++i)
         {
-
+            // 只有没被合并掉的索引才是最终的输出点
 
             scaffold_count++;
-
+            // 1. 输出 FASTA 标题行
             outFileFiltered2 << ">Scaffold_" << scaffold_count << "_" << contig_chain[i].contig_info_output[0].first << "\n";
 
-
-
+            // 2. 直接输出完整序列，不进行截断或分段
+            // 确保序列末尾有一个换行符，以便下一条序列的标题行从新行开始
             outFileFiltered2 << *(contig_chain[i].haplo_sequences) << "\n";
 
             outFileFiltered3 << "Scaffold_" << scaffold_count << endl;
@@ -18793,35 +18307,35 @@ void get_haplotype_path_test_code(
             }
         }
 
-        outFileFiltered << "Wrote " << scaffold_count << " sequences to scaffold.fa\n";
+        outFileFiltered << "最终输出 " << scaffold_count << " 条序列至 scaffold.fa\n";
 
-
+        // 此处可以调用你之前定义的 counter_worker_single_step_small_contig 相关逻辑
         // ...
     }
     else
     {
+        // 情况 B: 数量过多，从最短的开始合并
+        outFileFiltered << "决策: [情况 B] 节点数超出目标，启动最短 Contig 优先合并策略...\n";
 
-        outFileFiltered << "Decision B: node count exceeds target; starting shortest-contig-first merging.\n";
-
-
+        // 记录哪些 contig 已经被“合并掉”了（物理消失）
         std::set<int> merged_indices;
 
-
+        // 记录哪些 contig 已经被“尝试过但失败了”（不再作为起始点，但依然存在）
         std::set<int> tried_indices;
 
         int temp_count = current_count;
 
 
-        //TODO: debug for pig
+        //TODO: debug for pig 
 
-
+        // 循环直到数量降至目标阈值
         while (temp_count > target_limit)
         {
             uint32_t min_len = 0xFFFFFFFF;
             int shortest_chain_idx = -1;
 
             // =========================================================================================
-
+            // 1. 寻找当前未合并 且 未尝试失败 的最短 contig (捏软柿子)
             // =========================================================================================
             for (int i = 0; i < contig_chain.size(); ++i)
             {
@@ -18838,33 +18352,33 @@ void get_haplotype_path_test_code(
 
             if (shortest_chain_idx == -1)
             {
-                outFileFiltered << "All remaining nodes failed merge attempts; stopping early.\n";
-                break;
+                outFileFiltered << "所有剩余节点均已尝试合并但失败，提前结束循环。\n";
+                break; 
             }
 
             // =========================================================================================
-
+            // 2. 全局矩阵雷达扫描：寻找短序列的最强连接伙伴，并严格确定谁在左、谁在右
             // =========================================================================================
             uint32_t max_strength = 0;
-            int best_left_port = -1;
-            int best_right_port = -1;
-
-
+            int best_left_port = -1;  // 排在左侧的 contig 的连接端口 (矩阵行)
+            int best_right_port = -1; // 排在右侧的 contig 的连接端口 (矩阵列)
+            
+            // 遍历短序列的两个端口 (0: Head, 1: Tail)
             for (int my_side = 0; my_side < 2; ++my_side)
             {
                 int short_port = shortest_chain_idx * 2 + my_side;
 
-
+                // 遍历全局所有其他 contig 的端口
                 for (int other_port = 0; other_port < num_contigs_with_direction; ++other_port)
                 {
                     int other_chain_idx = other_port / 2;
 
-
+                    // 排除自己、已合并的、以及同源染色体
                     if (other_chain_idx == shortest_chain_idx) continue;
                     if (merged_indices.find(other_chain_idx) != merged_indices.end()) continue;
                     if (contig_chain[other_chain_idx].other_index == contig_chain[shortest_chain_idx].index) continue;
 
-
+                    // 【方向 A】: 假设 短序列 在左，其他序列 在右 (Short ---> Other)
                     if (connect_num11[short_port][other_port] > max_strength)
                     {
                         max_strength = connect_num11[short_port][other_port];
@@ -18872,7 +18386,7 @@ void get_haplotype_path_test_code(
                         best_right_port = other_port;
                     }
 
-
+                    // 【方向 B】: 假设 其他序列 在左，短序列 在右 (Other ---> Short)
                     if (connect_num11[other_port][short_port] > max_strength)
                     {
                         max_strength = connect_num11[other_port][short_port];
@@ -18883,35 +18397,39 @@ void get_haplotype_path_test_code(
             }
 
             // =========================================================================================
-
+            // 3. 执行物理拼接：完全遵循矩阵指示的 左/右 位置和 正/反 方向
             // =========================================================================================
             if (best_left_port != -1 && max_strength > dynamic_threshold)
             {
                 int left_chain_idx = best_left_port / 2;
                 int right_chain_idx = best_right_port / 2;
 
-
+                // 确定吸收方(Partner)：无论短序列在左还是在右，合并后的数据最终都存入长的那个体内
                 int partner_chain_idx = (left_chain_idx == shortest_chain_idx) ? right_chain_idx : left_chain_idx;
 
                 string left_name = contig_names[best_left_port];
                 string right_name = contig_names[best_right_port];
 
                 outFileFiltered << "--------------------------------------------------\n"
-                                << "Merge:  [" << left_name << " (len:" << contig_chain[left_chain_idx].path_length << ")] "
+                                << "合并指令: [" << left_name << " (len:" << contig_chain[left_chain_idx].path_length << ")] "
                                 << "---> [" << right_name << " (len:" << contig_chain[right_chain_idx].path_length << ")] "
-                                << "strength: " << max_strength << "\n";
+                                << "强度: " << max_strength << "\n";
 
                 string left_seq = *(contig_chain[left_chain_idx].haplo_sequences);
                 auto left_info = contig_chain[left_chain_idx].contig_info_output;
-
+                
                 string right_seq = *(contig_chain[right_chain_idx].haplo_sequences);
                 auto right_info = contig_chain[right_chain_idx].contig_info_output;
 
-
+                /* * 核心方向逻辑 (假设 0=Head/5', 1=Tail/3')：
+                 * 1. 左侧序列的连接端是 best_left_port。如果它是 Head(0)，说明其物理走向是 Tail -> Head -> GAP，需要反转。
+                 * 2. 右侧序列的连接端是 best_right_port。如果它是 Tail(1)，说明其物理走向是 GAP -> Tail -> Head，需要反转。
+                 * (注：如果你们上游工具定义 0=Tail，1=Head，请将下方的 == 0 和 == 1 互换)
+                 */
                 bool left_is_rev = (best_left_port % 2 == 0);
                 if (left_is_rev)
                 {
-                    outFileFiltered << "  Left endpoint is head; reverse-complementing the sequence.\n";
+                    outFileFiltered << "  [左侧处理]: 矩阵指示左侧端点为0(Head)，执行整体反向互补...\n";
                     left_seq = complement(left_seq);
                     std::reverse(left_info.begin(), left_info.end());
                     for (auto &info : left_info) info.second = !info.second;
@@ -18920,41 +18438,41 @@ void get_haplotype_path_test_code(
                 bool right_is_rev = (best_right_port % 2 == 1);
                 if (right_is_rev)
                 {
-                    outFileFiltered << "  Right endpoint is tail; reverse-complementing the sequence.\n";
+                    outFileFiltered << "  [右侧处理]: 矩阵指示右侧端点为1(Tail)，执行整体反向互补...\n";
                     right_seq = complement(right_seq);
                     std::reverse(right_info.begin(), right_info.end());
                     for (auto &info : right_info) info.second = !info.second;
                 }
 
-
+                // 大道至简：此时方向已绝对正确，直接串接
                 string gap(100, 'N');
                 string final_seq = left_seq + gap + right_seq;
                 auto final_info = left_info;
                 final_info.insert(final_info.end(), right_info.begin(), right_info.end());
 
-
+                // 数据写回长序列 (吸收方)
                 *(contig_chain[partner_chain_idx].haplo_sequences) = final_seq;
                 contig_chain[partner_chain_idx].contig_info_output = final_info;
                 contig_chain[partner_chain_idx].path_length = final_seq.length();
 
-                outFileFiltered << "  Physical join: " << left_name << (left_is_rev ? "(reverse)" : "(forward)")
-                                << " ---> 100N ---> " << right_name << (right_is_rev ? "(reverse)" : "(forward)") << "\n";
-                outFileFiltered << "  Merged record: contig_chain[" << partner_chain_idx << "]\n";
+                outFileFiltered << "  └─ 真实物理生成: " << left_name << (left_is_rev ? "(反转)" : "(正向)")
+                                << " ---> 100N ---> " << right_name << (right_is_rev ? "(反转)" : "(正向)") << "\n";
+                outFileFiltered << "  └─ 数据吸收方: contig_chain[" << partner_chain_idx << "]\n";
 
                 // =========================================================================================
-
+                // 4. 动态更新矩阵与状态复位 (核心改进)
                 // =========================================================================================
+                // a. 寻找新合并序列的两个“外露物理端点”
+                // 左侧序列被连接的一端是 best_left_port，那它的外露端就是异或 1 (0变1, 1变0)
+                int exposed_left_port = best_left_port ^ 1;  
+                // 同理，右侧序列的外露端
+                int exposed_right_port = best_right_port ^ 1; 
 
+                // b. 吸收方的新名分 (作为合并后新序列的头和尾)
+                int partner_new_head = partner_chain_idx * 2;     // 新序列的左端点
+                int partner_new_tail = partner_chain_idx * 2 + 1; // 新序列的右端点
 
-                int exposed_left_port = best_left_port ^ 1;
-
-                int exposed_right_port = best_right_port ^ 1;
-
-
-                int partner_new_head = partner_chain_idx * 2;
-                int partner_new_tail = partner_chain_idx * 2 + 1;
-
-
+                // c. 为了防止自我覆盖，先提取暴露端点的所有连接信号
                 std::vector<uint32_t> new_head_row(num_contigs_with_direction, 0);
                 std::vector<uint32_t> new_head_col(num_contigs_with_direction, 0);
                 std::vector<uint32_t> new_tail_row(num_contigs_with_direction, 0);
@@ -18967,20 +18485,20 @@ void get_haplotype_path_test_code(
                     new_tail_col[i] = connect_num11[i][exposed_right_port];
                 }
 
-
+                // d. 抹除已经被埋在序列内部的旧端口信号，以及短序列的所有痕迹，防止产生错误的循环图(Cycles)
                 for (int i = 0; i < num_contigs_with_direction; ++i) {
-
+                    // 清理内部连接点
                     connect_num11[best_left_port][i] = 0; connect_num11[i][best_left_port] = 0;
                     connect_num11[best_right_port][i] = 0; connect_num11[i][best_right_port] = 0;
-
-
+                    
+                    // 彻底注销短序列的原始端口
                     int short_port_0 = shortest_chain_idx * 2;
                     int short_port_1 = shortest_chain_idx * 2 + 1;
                     connect_num11[short_port_0][i] = 0; connect_num11[i][short_port_0] = 0;
                     connect_num11[short_port_1][i] = 0; connect_num11[i][short_port_1] = 0;
                 }
 
-
+                // e. 将提取出的外露信号，赋予吸收方的端口 (完成信号继承！)
                 for (int i = 0; i < num_contigs_with_direction; ++i) {
                     connect_num11[partner_new_head][i] = new_head_row[i];
                     connect_num11[i][partner_new_head] = new_head_col[i];
@@ -18988,41 +18506,41 @@ void get_haplotype_path_test_code(
                     connect_num11[i][partner_new_tail] = new_tail_col[i];
                 }
 
-
-
+                // f. 状态复活：长序列现在拥有了新的端点信号。如果它之前因为找不到伙伴被加入了“放弃名单”，
+                // 现在必须把它捞出来，让它在接下来的循环中可以继续向外延伸！
                 tried_indices.erase(partner_chain_idx);
-                outFileFiltered << "  Matrix updated: contig_chain[" << partner_chain_idx << "] now carries the new endpoint signals; search state reset.\n";
+                outFileFiltered << "  └─ [矩阵更新完毕]: contig_chain[" << partner_chain_idx << "] 已继承新端点信号并重置搜索状态。\n";
 
-
+                // 短序列完成使命，物理消失
                 merged_indices.insert(shortest_chain_idx);
-                temp_count -= 2;
+                temp_count -= 2; // (保持你原有的递减逻辑)
             }
             else
             {
-                outFileFiltered << "Warning: shortest contig " << contig_names[shortest_chain_idx * 2] << " has no valid connection and remains independent.\n";
+                outFileFiltered << "警告: 最短 Contig " << contig_names[shortest_chain_idx * 2] << " 无有效连接，强制标记为独立。\n";
                 tried_indices.insert(shortest_chain_idx);
                 target_limit += 2;
-                outFileFiltered << "      -> Relaxed target to: " << target_limit << " (remaining: " << temp_count << ")\n";
+                outFileFiltered << "      -> 目标阈值放宽至: " << target_limit << " (当前剩余: " << temp_count << ")\n";
             }
         }
 
 
         //TODO: end
 
-
-        outFileFiltered << "\nMerging completed; writing final scaffolds.\n";
+        // 4. 结束后，输出所有剩余的序列（包括合并后的长序列和未参与合并的序列）
+        outFileFiltered << "\n合并结束，开始输出最终 Scaffold...\n";
         int scaffold_count = 0;
         for (int i = 0; i < contig_chain.size(); ++i)
         {
-
+            // 只有没被合并掉的索引才是最终的输出点
             if (merged_indices.find(i) == merged_indices.end())
             {
                 scaffold_count++;
-
+                // 1. 输出 FASTA 标题行
                 outFileFiltered2 << ">Scaffold_" << scaffold_count << "_" << contig_chain[i].contig_info_output[0].first << "\n";
 
-
-
+                // 2. 直接输出完整序列，不进行截断或分段
+                // 确保序列末尾有一个换行符，以便下一条序列的标题行从新行开始
                 outFileFiltered2 << *(contig_chain[i].haplo_sequences) << "\n";
 
                 outFileFiltered3 << "Scaffold_" << scaffold_count << endl;
@@ -19033,16 +18551,16 @@ void get_haplotype_path_test_code(
             }
         }
 
-        outFileFiltered << "Wrote " << scaffold_count << " sequences to scaffold.fa\n";
+        outFileFiltered << "最终输出 " << scaffold_count << " 条序列至 scaffold.fa\n";
     }
 
     // ---------------------------------------------------------
-
+    //  输出未被访问的孤儿 Contig (Unvisited / Leftover Contigs)
     // ---------------------------------------------------------
 
+    
 
-
-
+    // 5. 收尾工作
     if (outUnvisitedTxt.is_open())
     {
         outUnvisitedTxt << "\nTotal Unvisited Count: " << unvisited_total_count
@@ -19050,14 +18568,14 @@ void get_haplotype_path_test_code(
         outUnvisitedTxt.close();
     }
 
-
+    // 这里的日志打印就能准确反映情况了
     std::cout << "Found " << unvisited_total_count << " unvisited contigs in total." << std::endl;
     std::cout << "Exported " << exported_to_fa_count << " contigs (passed length filter) to scaffold.fa." << std::endl;
 
     outFileFiltered2.close();
     // for (size_t idx = 0; idx < contig_chain.size() - chr_n; idx++)
 
-
+    // 首先按group_id_new对contig_chain进行分组
     std::unordered_map<uint32_t, std::vector<size_t>> groups_id_new;
     for (size_t idx = 0; idx < contig_chain.size(); idx++)
     {
@@ -19068,7 +18586,7 @@ void get_haplotype_path_test_code(
         }
     }
 
-
+    // 收集所有group_id_new并按从小到大排序
     std::vector<uint32_t> sorted_group_ids;
     for (const auto &pair : groups_id_new)
     {
@@ -19076,10 +18594,10 @@ void get_haplotype_path_test_code(
     }
     std::sort(sorted_group_ids.begin(), sorted_group_ids.end());
 
-
+    // 存储已选择的contig，避免重复选择
     std::unordered_set<std::string> selected_contigs;
 
-
+    // 输出前chr_n个group的连接
     int output_count = contig_chain.size() / 2;
     for (uint32_t group_id : sorted_group_ids)
     {
@@ -19089,19 +18607,19 @@ void get_haplotype_path_test_code(
         const auto &group_chains = groups_id_new[group_id];
         if (group_chains.size() < 2)
         {
-
+            // 如果group里少于2个contig，跳过
             cout << "group_id: " << group_id << " has less than 2 chains" << endl;
             continue;
         }
 
-
+        // 获取这个group中的两个contig（假设每个group正好有2个配对的contig）
         size_t idx1 = group_chains[0];
         size_t idx2 = (group_chains.size() > 1) ? group_chains[1] : idx1;
 
         const auto &chain1 = contig_chain[idx1];
         const auto &chain2 = contig_chain[idx2];
         cout << "Processing group_id: " << group_id << " with chains " << chain1.index << " and " << chain2.index << endl;
-
+        // 获取两个contig的名称（从contig_info_output获取第一个contig名称）
         std::string contig1_name, contig2_name;
         if (!chain1.contig_info_output.empty())
         {
@@ -19112,23 +18630,23 @@ void get_haplotype_path_test_code(
             contig2_name = chain2.contig_info_output[0].first;
         }
 
-
+        // 如果contig名称为空，跳过
         if (contig1_name.empty() || contig2_name.empty())
         {
             continue;
         }
 
-
+        // 检查是否已被选择过
         if (selected_contigs.find(contig1_name) != selected_contigs.end() ||
             selected_contigs.find(contig2_name) != selected_contigs.end())
         {
             continue;
         }
 
-
+        // 在contig_names中找到对应的索引（考虑正负方向）
         int contig1_base_idx = -1, contig2_base_idx = -1;
         for (int i = 0; i < num_contigs_with_direction; i += 2)
-        {
+        { // 只检查+方向
             string base_name = contig_names[i].substr(0, contig_names[i].size() - 1);
             if (base_name == contig1_name)
                 contig1_base_idx = i;
@@ -19138,15 +18656,15 @@ void get_haplotype_path_test_code(
 
         if (contig1_base_idx == -1 || contig2_base_idx == -1)
         {
-
+            // 没找到对应的contig索引，跳过
             continue;
         }
 
-
+        // 检查两个contig之间的连接强度
         uint32_t max_strength = 0;
         int best_i = -1, best_j = -1;
 
-
+        // 检查所有方向组合（0:+, 1:-）
         for (int dir1 = 0; dir1 < 2; dir1++)
         {
             for (int dir2 = 0; dir2 < 2; dir2++)
@@ -19169,7 +18687,7 @@ void get_haplotype_path_test_code(
 
         if (max_strength > 0)
         {
-
+            // 输出最强的连接
             string name_i = contig_names[best_i];
             string name_j = contig_names[best_j];
 
@@ -19187,7 +18705,7 @@ void get_haplotype_path_test_code(
                             << dir_j << "\t"
                             << group_id << "\n";
 
-
+            // 标记这两个contig已被选择
             selected_contigs.insert(contig1_name);
             selected_contigs.insert(contig2_name);
 
@@ -19198,17 +18716,17 @@ void get_haplotype_path_test_code(
         }
     }
 
-
+    // // 如果选择的group数量不足chr_n，补充输出
     // if (output_count < chr_n)
     // {
-
+    //     // 从剩余的连接中选择最强的
     //     vector<tuple<uint32_t, int, int, string, string>> remaining_connections;
 
     //     for (int i = 0; i < num_contigs_with_direction; i += 2)
-
+    //     { // 只考虑+方向的contig
     //         string base_name_i = contig_names[i].substr(0, contig_names[i].size() - 1);
 
-
+    //         // 跳过已选择的contig
     //         if (selected_contigs.find(base_name_i) != selected_contigs.end())
     //         {
     //             continue;
@@ -19218,13 +18736,13 @@ void get_haplotype_path_test_code(
     //         {
     //             string base_name_j = contig_names[j].substr(0, contig_names[j].size() - 1);
 
-
+    //             // 跳过已选择的contig
     //             if (selected_contigs.find(base_name_j) != selected_contigs.end())
     //             {
     //                 continue;
     //             }
 
-
+    //             // 找到两个contig之间的最强连接
     //             uint32_t max_strength = 0;
     //             int best_i_idx = -1, best_j_idx = -1;
 
@@ -19252,12 +18770,12 @@ void get_haplotype_path_test_code(
     //         }
     //     }
 
-
+    //     // 按强度降序排序
     //     sort(remaining_connections.begin(), remaining_connections.end(),
     //          [](const auto &a, const auto &b)
     //          { return get<0>(a) > get<0>(b); });
 
-
+    //     // 输出剩余的连接，直到达到chr_n个
     //     for (const auto &conn : remaining_connections)
     //     {
     //         if (output_count >= chr_n)
@@ -19269,7 +18787,7 @@ void get_haplotype_path_test_code(
     //         string base_name_i = get<3>(conn);
     //         string base_name_j = get<4>(conn);
 
-
+    //         // 检查是否已被选择（双重检查）
     //         if (selected_contigs.find(base_name_i) != selected_contigs.end() ||
     //             selected_contigs.find(base_name_j) != selected_contigs.end())
     //         {
@@ -19302,7 +18820,7 @@ void get_haplotype_path_test_code(
 
     cerr << "Total " << output_count << " chromosome connections selected" << endl;
 
-
+    // 关闭文件
     outFileFiltered.close();
 }
 
@@ -19325,7 +18843,6 @@ struct MclScaffoldEdge
     size_t a, b;
     int a_end, b_end;
     uint32_t links;
-    uint32_t second_links;
     double confidence;
 };
 
@@ -19442,7 +18959,7 @@ static void merge_mcl_clusters_to_target(vector<int> &clusters,
 
 static MclScaffoldEdge best_mcl_edge(size_t a, size_t b, uint32_t **matrix)
 {
-    MclScaffoldEdge result = {a, b, 0, 0, 0, 0, 0.0};
+    MclScaffoldEdge result = {a, b, 0, 0, 0, 0.0};
     uint32_t second = 0;
     for (int ae = 0; ae < 2; ++ae)
         for (int be = 0; be < 2; ++be)
@@ -19459,7 +18976,6 @@ static MclScaffoldEdge best_mcl_edge(size_t a, size_t b, uint32_t **matrix)
             else if (value > second)
                 second = value;
         }
-    result.second_links = second;
     result.confidence = result.links / (double)max<uint32_t>(1, second);
     return result;
 }
@@ -19477,37 +18993,6 @@ static bool run_pair_aware_mcl_scaffolding(vector<contig_chains> &chains,
     {
         cerr << "[MCL] No contig chains available for global scaffolding.\n";
         return true;
-    }
-
-    map<pair<string, string>, pair<int, int>> forced_pairs;
-    if (!params.forced_chain_links.empty())
-    {
-        ifstream forced_in(params.forced_chain_links);
-        if (!forced_in)
-        {
-            cerr << "[MCL::ERROR] Cannot open forced-chain link file "
-                 << params.forced_chain_links << "\n";
-            return false;
-        }
-        string line;
-        while (getline(forced_in, line))
-        {
-            const size_t comment = line.find('#');
-            if (comment != string::npos) line.erase(comment);
-            istringstream fields(line);
-            string left, right;
-            int left_end = -1, right_end = -1;
-            if (!(fields >> left >> right)) continue;
-            fields >> left_end >> right_end;
-            if (right < left)
-            {
-                swap(left, right);
-                swap(left_end, right_end);
-            }
-            forced_pairs[make_pair(left, right)] = make_pair(left_end, right_end);
-        }
-        cerr << "[MCL] Loaded " << forced_pairs.size()
-             << " diagnostic forced-chain link pairs.\n";
     }
 
     unordered_map<uint32_t, size_t> id_to_pos;
@@ -19622,51 +19107,19 @@ static bool run_pair_aware_mcl_scaffolding(vector<contig_chains> &chains,
     cluster_out.close();
 
     vector<MclScaffoldEdge> candidates;
-    ofstream all_edges(output_directory + "/mcl_edge_candidates_all.tsv");
-    all_edges << "a\tb\ta_cluster\tb_cluster\ta_end\tb_end\tbest_links\tsecond_links\tconfidence\tstatus\n";
     for (size_t a = 0; a < n; ++a)
         for (size_t b = a + 1; b < n; ++b)
         {
             if (chains[a].group_id_new == UINT32_MAX - 1 ||
                 chains[b].group_id_new == UINT32_MAX - 1)
                 continue;
+            if (chain_cluster[a] != chain_cluster[b]) continue;
+            if (chains[a].is_paired && chains[a].other_index == chains[b].index) continue;
             MclScaffoldEdge edge = best_mcl_edge(a, b, connect_num11);
-            string force_a = mcl_chain_name(chains[a]);
-            string force_b = mcl_chain_name(chains[b]);
-            if (force_b < force_a) swap(force_a, force_b);
-            const auto forced_it = forced_pairs.find(make_pair(force_a, force_b));
-            const bool forced = forced_it != forced_pairs.end();
-            if (forced && forced_it->second.first >= 0 && forced_it->second.second >= 0)
-            {
-                const string name_a = mcl_chain_name(chains[a]);
-                if (name_a == force_a)
-                {
-                    edge.a_end = forced_it->second.first;
-                    edge.b_end = forced_it->second.second;
-                }
-                else
-                {
-                    edge.a_end = forced_it->second.second;
-                    edge.b_end = forced_it->second.first;
-                }
-            }
-            const bool same_cluster = chain_cluster[a] == chain_cluster[b];
-            const bool homolog_pair = chains[a].is_paired && chains[a].other_index == chains[b].index;
-            const bool links_ok = forced ? edge.links > 0 : edge.links >= params.paired_merge_min_links;
-            const bool confidence_ok = forced ? true : edge.confidence >= params.paired_merge_min_confidence;
-            const bool whitelist_ok = forced_pairs.empty() || forced;
-            if (edge.links > 0)
-                all_edges << mcl_chain_name(chains[a]) << "\t" << mcl_chain_name(chains[b]) << "\t"
-                          << chain_cluster[a] << "\t" << chain_cluster[b] << "\t"
-                          << edge.a_end << "\t" << edge.b_end << "\t" << edge.links << "\t"
-                          << edge.second_links << "\t" << edge.confidence << "\t"
-                          << (!whitelist_ok ? "not_forced_whitelist" : !same_cluster ? "different_cluster" : homolog_pair ? "homolog_pair" :
-                              !links_ok ? "below_links" : !confidence_ok ? "below_confidence" : "candidate")
-                          << "\n";
-            if (whitelist_ok && same_cluster && !homolog_pair && links_ok && confidence_ok)
+            if (edge.links >= params.paired_merge_min_links &&
+                edge.confidence >= params.paired_merge_min_confidence)
                 candidates.push_back(edge);
         }
-    all_edges.close();
     sort(candidates.begin(), candidates.end(), [](const MclScaffoldEdge &x, const MclScaffoldEdge &y)
          { return x.links > y.links; });
 
@@ -19797,14 +19250,14 @@ static bool run_pair_aware_mcl_scaffolding(vector<contig_chains> &chains,
 }
 
 void get_haplotype_path_now(
-    uint32_t **connections_foward,
-    uint32_t **connections_backward,
-    asg_t *graph,
+    uint32_t **connections_foward, 
+    uint32_t **connections_backward, 
+    asg_t *graph, 
     map<uint32_t, map<uint32_t, set<uint32_t>>> *bubble_chain_graph,
-    char *output_directory,
-    std::vector<NamedBubbleContig>& named_bubble_contigs,
-    char *gfa_filename,
-    const GlobalParams& g_params)
+    char *output_directory, 
+    std::vector<NamedBubbleContig>& named_bubble_contigs, 
+    char *gfa_filename, 
+    const GlobalParams& g_params) 
 {
 
 
@@ -19825,7 +19278,6 @@ void get_haplotype_path_now(
     cout << "Start get haplotypes" << endl;
 
     uint32_t **connections_count;
-    vector<vector<pair<uint32_t, uint32_t>>> connections_sparse(graph->n_seq);
     CALLOC(connections_count, graph->n_seq);
     for (int i = 0; i < graph->n_seq; i++)
     {
@@ -19841,15 +19293,13 @@ void get_haplotype_path_now(
             // if(connection_count_forward[i][j]+connection_count_backward[i][j]>0){
             connections_count[i][j] = connection_count_forward[i][j] + connection_count_backward[i][j];
             connections_count[i][j] += connection_count_forward[j][i] + connection_count_backward[j][i];
-            if (connections_count[i][j] != 0)
-                connections_sparse[i].push_back(make_pair((uint32_t)j, connections_count[i][j]));
         }
     }
     // print_graph_edges(graph);
     std::unordered_map<std::string, ContigPath> contig_paths;
-    read_contig_csv_1(utg_ctg_file, hap1_gfa, hap2_gfa, utg_gfa);
-    read_contig_csv(utg_ctg_file, hap1_gfa, hap2_gfa, contig_paths);
-    initialize_contig_paths(contig_paths, graph);
+    read_contig_csv_1(utg_ctg_file, hap1_gfa, hap2_gfa, utg_gfa);    // 调用读取函数
+    read_contig_csv(utg_ctg_file, hap1_gfa, hap2_gfa, contig_paths); // 调用读取函数
+    initialize_contig_paths(contig_paths, graph);                    // contig_paths 存入node值
     vector<vector<hap_chain_result_t>> hap_results = hap_results_debug;
     vector<vector<uint32_t>> unvisited_nodes = unvisited_nodes_global;
     match_hap_results_with_contigs(hap_results, unvisited_nodes, contig_paths, graph, connection_count_forward, connection_count_backward, output_directory);
@@ -19876,11 +19326,11 @@ void get_haplotype_path_now(
                 }
             }
 
-
+            // 获取 begin node 和 end node 的名字
             string beg_node_name = graph->seq[bubble->begNode / 2].name;
             string end_node_name = graph->seq[bubble->endNode / 2].name;
 
-
+            // 判断是 pure 还是 complex 并输出信息
             if (nodes.size() > 50)
             {
                 complex_bubbles.push_back(bubble);
@@ -19898,7 +19348,7 @@ void get_haplotype_path_now(
                 //      << ", Type: pure" << endl;
             }
 
-
+            // 输出包含的 node 节点
             if (nodes.size() >= 1)
             {
                 // cout << "Contained Nodes: ";
@@ -20017,13 +19467,6 @@ void get_haplotype_path_now(
     shared_data shared;
     shared.graph = graph;
     shared.connections_count = connections_count;
-    shared.connections_sparse = &connections_sparse;
-    {
-        const char *engine = getenv("HAPFOLD_BUBBLE_CONTACT_ENGINE");
-        shared.use_sparse_connections = (engine == nullptr || string(engine) != "legacy");
-        cerr << "[HapFold] Bubble contact engine: "
-             << (shared.use_sparse_connections ? "sparse" : "legacy") << endl;
-    }
     shared.node_path_id_map = &node_path_id_map;
     shared.node_bubble_map = &node_bubble_map;
     step_data step;
@@ -20068,23 +19511,23 @@ void get_haplotype_path_now(
 
     map<int, vector<int>> component_step_map; // component_id -> list of step index
 
-
+    // 遍历 step 中的所有路径
     for (size_t step_idx = 0; step_idx < step.beg_node->size(); ++step_idx)
     {
         uint32_t beg = (*step.beg_node)[step_idx];
         uint32_t end = (*step.end_node)[step_idx];
         set<uint32_t> &nodes = (*step.current_nodes)[step_idx];
 
-
+       
         for (size_t comp_id = 0; comp_id < bubble_chains.size(); ++comp_id)
         {
             for (auto &bc : bubble_chains[comp_id])
             {
-
+                
                 if (bc.begin == beg && bc.end == end)
                 {
                     component_step_map[comp_id].push_back(step_idx);
-                    break;
+                    break; 
                 }
             }
         }
@@ -20102,34 +19545,9 @@ void get_haplotype_path_now(
     // }
 
     //.........................................................................................................
-    unordered_map<bubble_t *, uint32_t> bubble_phase_ids;
-    vector<vector<sparse_phase_edge_t>> bubble_phase_graph;
-    const char *phase_worker_env = getenv("HAPFOLD_PHASE_WORKER");
-    const bool use_legacy_phase_worker =
-        phase_worker_env != nullptr && string(phase_worker_env) == "legacy";
-    if (use_legacy_phase_worker)
-    {
-        cerr << "[SparsePhase] HAPFOLD_PHASE_WORKER=legacy; using preserved worker_for_single_step" << endl;
-        kt_for(n_threads, worker_for_single_step, &step, step.beg_node->size());
-    }
-    else
-    {
-        cerr << "[SparsePhase] building compact signed bubble graph" << endl;
-        bubble_phase_graph = build_sparse_bubble_phase_graph(
-            n_threads, graph->n_seq, connections_sparse, node_bubble_map,
-            node_path_id_map, pure_bubbles, bubble_phase_ids);
-        shared.bubble_phase_graph = &bubble_phase_graph;
-        shared.bubble_phase_ids = &bubble_phase_ids;
-        atomic<uint32_t> completed_steps(0);
-        mutex progress_mutex;
-        step.completed_steps = &completed_steps;
-        step.progress_start = chrono::steady_clock::now();
-        step.progress_mutex = &progress_mutex;
-        cerr << "[SparsePhase] starting " << step.beg_node->size()
-             << " components with " << n_threads << " threads" << endl;
-        kt_for(n_threads, worker_for_single_step_phase_graph, &step, step.beg_node->size());
-    }
-    cout<<"End phase worker."<<endl;
+
+    kt_for(n_threads, worker_for_single_step, &step, step.beg_node->size());
+    cout<<"End worker_for_single_step."<<endl;
     //.........................................................................................................
 
     // cout << "step.beg_node->size(): " << step.beg_node->size() << endl;
@@ -20148,7 +19566,7 @@ void get_haplotype_path_now(
     }
     outFileContigHapNodes.close();
 
-
+    // 2. 构造 beg_node 到 component index 的映射
     unordered_map<uint32_t, size_t> beg_node_to_component;
     for (size_t comp_idx = 0; comp_idx < bubble_chains.size(); ++comp_idx)
     {
@@ -20158,7 +19576,7 @@ void get_haplotype_path_now(
         }
     }
 
-
+    // 3. 遍历 step.beg_node，构造 bubble_contig 插入对应 component
     for (size_t i = 0; i < step.beg_node->size(); ++i)
     {
         uint32_t beg = (*step.beg_node)[i];
@@ -20183,10 +19601,10 @@ void get_haplotype_path_now(
         bubble_contigs[comp_idx].push_back(bc);
     }
 
-
+    
     std::vector<std::vector<bubble_chain_result>> bubble_chain_results1(bubble_chains.size());
     cout << "Start to convert bubble_chains to bubble_chain_results" << endl;
-
+    
     unordered_map<uint32_t, size_t> beg_node_to_component1;
     for (size_t comp_idx = 0; comp_idx < bubble_chains.size(); ++comp_idx)
     {
@@ -20196,7 +19614,7 @@ void get_haplotype_path_now(
         }
     }
 
-
+    
     for (size_t i = 0; i < step.beg_node->size(); ++i)
     {
         uint32_t beg = (*step.beg_node)[i];
@@ -20216,13 +19634,13 @@ void get_haplotype_path_now(
         bcr.begin = beg;
         bcr.end = end;
 
-
+     
         bcr.hap_path1 = step.haplo_pathes[i * 2];
         bcr.hap_path2 = step.haplo_pathes[i * 2 + 1];
         bcr.hap1_seq = step.haplo_sequences[i * 2];
         bcr.hap2_seq = step.haplo_sequences[i * 2 + 1];
 
-
+       
         if (!bcr.hap_path1.empty())
         {
             bcr.hap1_begin = beg;
@@ -20230,7 +19648,7 @@ void get_haplotype_path_now(
         }
         else
         {
-            bcr.hap1_begin = bcr.hap1_end = UINT32_MAX;
+            bcr.hap1_begin = bcr.hap1_end = UINT32_MAX; 
         }
         if (!bcr.hap_path2.empty())
         {
@@ -20242,15 +19660,15 @@ void get_haplotype_path_now(
             bcr.hap2_begin = bcr.hap2_end = UINT32_MAX;
         }
 
-
+      
         bcr.nodes.insert(bcr.hap_path1.begin(), bcr.hap_path1.end());
         bcr.nodes.insert(bcr.hap_path2.begin(), bcr.hap_path2.end());
 
+      
+        bcr.is_bubble = true;    // 占位
+        bcr.is_hap_only = false; // 占位
 
-        bcr.is_bubble = true;
-        bcr.is_hap_only = false;
-
-
+        // 其它布尔标志位可以初始化
         bcr.hap_path1_arrived = false;
         bcr.hap_path2_arrived = false;
 
@@ -20275,7 +19693,7 @@ void get_haplotype_path_now(
             std::string fasta_name;
             fasta_name = "contig_" + std::to_string(out_hap_contig_count++) + "_hap" + graph->seq[hap_results[i][j].hap_path[0] >> 1].name;
 
-
+            // 写入 FASTA 格式
             out_hap_contig << ">" << fasta_name << std::endl;
             out_hap_contig << hap_results[i][j].hap_sequence << std::endl;
         }
@@ -20305,49 +19723,49 @@ void get_haplotype_path_now(
     step11.connection_count_backward = connection_count_backward;
     step11.len = total_paths;
     step11.contig_name = new std::string[total_paths];
-
+   
     contig_for_phasing(step11, bubble_chain_results1, graph,
                        connections_count, components1, output_directory, contig_paths, group_contigs, connection_count_forward, connection_count_backward);
 
     cout << " contig_chain size: " << contig_chain.size() << endl;
-
+  
     std::vector<size_t> sorted_indices(contig_chain.size());
-    std::iota(sorted_indices.begin(), sorted_indices.end(), 0);
+    std::iota(sorted_indices.begin(), sorted_indices.end(), 0); // 填充0,1,2,...
     std::sort(sorted_indices.begin(), sorted_indices.end(),
               [&contig_chain](size_t i, size_t j)
               {
                   return contig_chain[i].path_length > contig_chain[j].path_length;
               });
 
-
+  
     for (auto &chain : contig_chain)
     {
-        chain.group_id_new = UINT32_MAX;
+        chain.group_id_new = UINT32_MAX; // 表示未分配新group
     }
 
-
+  
     uint32_t new_group_counter = 0;
     std::vector<bool> processed(contig_chain.size(), false);
 
-
+   
     for (size_t idx : sorted_indices)
     {
         auto &chain = contig_chain[idx];
 
-
+       
         if (processed[idx])
             continue;
 
-
+      
         processed[idx] = true;
 
-
+ 
         chain.group_id_new = new_group_counter;
 
-
+     
         if (chain.is_paired && chain.other_index != UINT32_MAX)
         {
-
+           
             uint32_t partner_idx = UINT32_MAX;
             for (size_t i = 0; i < contig_chain.size(); i++)
             {
@@ -20360,7 +19778,7 @@ void get_haplotype_path_now(
 
             if (partner_idx != UINT32_MAX && !processed[partner_idx])
             {
-
+               
                 contig_chain[partner_idx].group_id_new = new_group_counter;
                 processed[partner_idx] = true;
 
@@ -20371,14 +19789,14 @@ void get_haplotype_path_now(
             }
             else
             {
-
+                // 如果配对链已处理或无效，当前链单独一个group
                 std::cerr << "New group " << new_group_counter << ": Chain " << chain.index
                           << " (len: " << chain.path_length << " bp) alone" << std::endl;
             }
         }
         else
         {
-
+            
             std::cerr << "New group " << new_group_counter << ": Chain " << chain.index
                       << " (len: " << chain.path_length << " bp) alone" << std::endl;
         }
@@ -20391,9 +19809,9 @@ void get_haplotype_path_now(
               {
                   if (a.group_id_new != b.group_id_new)
                   {
-                      return a.group_id_new < b.group_id_new;
+                      return a.group_id_new < b.group_id_new; // 先按 group_id_new 升序
                   }
-
+                 
                   return a.path_length > b.path_length;
               });
 
@@ -20413,12 +19831,12 @@ void get_haplotype_path_now(
         std::cerr << "  Paired with chain index: "
                   << (chain.other_index != UINT32_MAX ? std::to_string(chain.other_index) : "NONE") << std::endl;
 
-
+     
         std::cerr << "  Begin node: " << chain.beg_node << std::endl;
         std::cerr << "  End node: " << chain.end_node << std::endl;
         std::cerr << "  Path length: " << chain.path_length << " bp" << std::endl;
 
-
+     
         std::cerr << "  UTG path nodes (" << chain.utg_path_node.size() << " nodes): ";
         for (size_t j = 0; j < std::min((size_t)10, chain.utg_path_node.size()); j++)
         {
@@ -20434,7 +19852,7 @@ void get_haplotype_path_now(
         }
         std::cerr << std::endl;
 
-
+    
         if (!chain.node_positions.empty())
         {
             std::cerr << "  Node positions (first " << std::min((size_t)3, chain.node_positions.size()) << "): ";
@@ -20456,7 +19874,7 @@ void get_haplotype_path_now(
             std::cerr << std::endl;
         }
 
-
+     
         if (!chain.contig_info_output.empty())
         {
             std::cerr << "  Contig info (" << chain.contig_info_output.size() << " contigs): ";
@@ -20476,13 +19894,13 @@ void get_haplotype_path_now(
             }
             std::cerr << std::endl;
         }
-
+       
         cerr << "Now is done" << endl;
     }
 
     std::cout << "\n=== Summary ===" << std::endl;
 
-
+   
     uint32_t paired_count = 0;
     uint32_t unpaired_count = 0;
     for (const auto &chain : contig_chain)
@@ -20500,7 +19918,7 @@ void get_haplotype_path_now(
     std::cout << "Paired chains: " << paired_count << std::endl;
     std::cout << "Unpaired chains: " << unpaired_count << std::endl;
 
-
+  
     if (!contig_chain.empty())
     {
         uint32_t min_length = UINT32_MAX;
@@ -20525,7 +19943,7 @@ void get_haplotype_path_now(
 
     std::cout << "=== End of Contig Chain Information ===\n"
               << std::endl;
-
+   
 
 
 
@@ -20540,22 +19958,22 @@ void get_haplotype_path_now(
             // cout << contig_pair.first << " ";
         }
     }
-
+   
     cout << "unvisited_contigs (Scaffolding small contigs into individual HTGs within main contigs)..." << endl;
 
-
+    
     map<uint32_t, vector<uint32_t>> group_to_main_contigs;
     for (uint32_t i = 0; i < contig_chain.size(); i++)
     {
         group_to_main_contigs[contig_chain[i].group_id_new].push_back(i);
     }
 
-
+   
     struct HtgRef
     {
-        uint32_t orig_idx;
-        uint32_t sub_idx;
-        bool is_forward;
+        uint32_t orig_idx; 
+        uint32_t sub_idx; 
+        bool is_forward;   
     };
 
     struct Insertion
@@ -20568,12 +19986,12 @@ void get_haplotype_path_now(
         uint32_t score;
     };
 
-
+   
     for (size_t g_idx = 0; g_idx < group_contigs.size(); ++g_idx)
     {
         const auto &group = group_contigs[g_idx];
 
-
+       
         vector<string> unvisited_h1;
         vector<string> unvisited_h2;
 
@@ -20581,7 +19999,7 @@ void get_haplotype_path_now(
         {
             if (visited_set.find(contig_name) == visited_set.end())
             {
-
+                
                 if (contig_name.find("h1tg") != string::npos || contig_name.find("hap1") != string::npos)
                 {
                     unvisited_h1.push_back(contig_name);
@@ -20592,14 +20010,14 @@ void get_haplotype_path_now(
                 }
                 else
                 {
-
+                   
                     unvisited_h1.push_back(contig_name);
                     unvisited_h2.push_back(contig_name);
                 }
             }
         }
 
-
+     
         for (int hap = 1; hap <= 2; ++hap)
         {
             vector<string> &current_unvisited = (hap == 1) ? unvisited_h1 : unvisited_h2;
@@ -20610,7 +20028,7 @@ void get_haplotype_path_now(
             cstep_small_contig.contig_chains_ptr_small = new std::vector<contig_chains_small_contig>();
             vector<contig_chains_small_contig> small_contig;
 
-
+         
             for (uint32_t i = 0; i < current_unvisited.size(); i++)
             {
                 std::string contig_name = current_unvisited[i];
@@ -20644,7 +20062,7 @@ void get_haplotype_path_now(
                 continue;
             }
 
-
+     
             vector<contig_chains> local_main_htgs;
             vector<HtgRef> local_main_refs;
             auto it_main = group_to_main_contigs.find(g_idx);
@@ -20653,7 +20071,7 @@ void get_haplotype_path_now(
                 for (uint32_t orig_idx : it_main->second)
                 {
                     bool is_h1 = false, is_h2 = false;
-
+                   
                     if (!contig_chain[orig_idx].contig_info_output.empty())
                     {
                         const string &firstName = contig_chain[orig_idx].contig_info_output.front().first;
@@ -20665,7 +20083,7 @@ void get_haplotype_path_now(
 
                     if ((hap == 1 && is_h1) || (hap == 2 && is_h2) || (!is_h1 && !is_h2))
                     {
-
+                      
                         for (size_t sub_idx = 0; sub_idx < contig_chain[orig_idx].contig_info_output.size(); ++sub_idx)
                         {
                             const auto &htg_info = contig_chain[orig_idx].contig_info_output[sub_idx];
@@ -20684,7 +20102,7 @@ void get_haplotype_path_now(
                                 }
 
                                 local_main_htgs.push_back(htg_chain);
-
+                               
                                 local_main_refs.push_back({orig_idx, (uint32_t)sub_idx, htg_forward});
                             }
                         }
@@ -20695,7 +20113,7 @@ void get_haplotype_path_now(
             if (local_main_htgs.empty())
             {
                 delete cstep_small_contig.contig_chains_ptr_small;
-                continue;
+                continue; 
             }
 
             cstep_small_contig.contig_chains_ptr = &local_main_htgs;
@@ -20705,7 +20123,7 @@ void get_haplotype_path_now(
             std::cerr << "Group " << g_idx << " Hap " << hap << " matrix: "
                       << m << " small contigs × " << n << " individual HTGs" << std::endl;
 
-
+          
             uint32_t **connect_small = (uint32_t **)calloc(m * 2, sizeof(uint32_t *));
             for (size_t i = 0; i < m * 2; i++)
             {
@@ -20718,7 +20136,7 @@ void get_haplotype_path_now(
 
             kt_for(n_threads, counter_worker_single_step_small_contig, &cstep_small_contig, m);
 
-
+         
             // if (enzymes.size() == 0)
             // {
                 for (int i = 0; i < m * 2; i++)
@@ -20741,11 +20159,11 @@ void get_haplotype_path_now(
             // }
 
             uint32_t small_threshold = calculate_dynamic_threshold(connect_small, m, n);
-
+          
             cerr << "Group " << g_idx << " Hap " << hap << " calculated threshold: " << small_threshold
                  << " (Ignored, mapping purely by highest signal > 0)" << endl;
 
-
+      
             struct Candidate
             {
                 int i;
@@ -20756,7 +20174,7 @@ void get_haplotype_path_now(
             };
             vector<Candidate> candidates;
 
-
+       
             for (int i = 0; i < m; ++i)
             {
                 uint32_t best_j = -1, max_conn = 0, best_dir_i = 0, best_dir_j = 0;
@@ -20768,7 +20186,7 @@ void get_haplotype_path_now(
                         for (int dir_j = 0; dir_j < 2; ++dir_j)
                         {
                             uint32_t conn = connect_small[(i << 1) + dir_i][(j << 1) + dir_j];
-
+                          
                             if (conn > max_conn)
                             {
                                 max_conn = conn;
@@ -20780,25 +20198,25 @@ void get_haplotype_path_now(
                     }
                 }
 
-
+             
                 if (max_conn > 0 && best_j != (uint32_t)-1)
                 {
                     candidates.push_back({i, best_j, best_dir_i, best_dir_j, max_conn});
                 }
             }
 
-
+          
             sort(candidates.begin(), candidates.end(), [](const Candidate &a, const Candidate &b)
                  { return a.max_conn > b.max_conn; });
 
             vector<Insertion> planned_insertions;
 
-
+       
             for (const auto &cand : candidates)
             {
                 HtgRef ref = local_main_refs[cand.best_j];
 
-
+            
                 bool insert_before = false;
                 if (ref.is_forward)
                 {
@@ -20810,7 +20228,7 @@ void get_haplotype_path_now(
                 }
                 uint32_t insert_pos = ref.sub_idx + (insert_before ? 0 : 1);
 
-
+             
                 bool same_orientation = (cand.best_dir_i != cand.best_dir_j);
                 bool small_is_forward = ref.is_forward ? same_orientation : !same_orientation;
 
@@ -20820,11 +20238,11 @@ void get_haplotype_path_now(
                     small_contig[cand.i].contig_name,
                     small_is_forward,
                     (uint32_t)cand.i,
-                    cand.max_conn
+                    cand.max_conn 
                 });
             }
 
-
+           
             map<uint32_t, vector<Insertion>> insertions_by_orig;
             for (const auto &ins : planned_insertions)
             {
@@ -20836,11 +20254,11 @@ void get_haplotype_path_now(
                 uint32_t orig_idx = pair.first;
                 auto &ins_list = pair.second;
 
-
+             
                 sort(ins_list.begin(), ins_list.end(), [](const Insertion &a, const Insertion &b)
                      { return a.insert_pos > b.insert_pos; });
 
-
+             
                 for (const auto &ins : ins_list)
                 {
                     contig_chain[orig_idx].contig_info_output.insert(
@@ -20848,9 +20266,9 @@ void get_haplotype_path_now(
                         {ins.small_name, ins.is_forward});
                 }
 
-
+          
                 contig_chain[orig_idx].utg_path_node.clear();
-                contig_chain[orig_idx].node_positions.clear();
+                contig_chain[orig_idx].node_positions.clear(); 
                 contig_chain[orig_idx].path_length = 0;
 
                 for (const auto &info : contig_chain[orig_idx].contig_info_output)
@@ -20860,25 +20278,25 @@ void get_haplotype_path_now(
                     {
                         uint32_t current_offset = contig_chain[orig_idx].path_length;
                         if (info.second)
-                        {
+                        { 
                             for (size_t k = 0; k < it_path->second.utg_nodes.size(); ++k)
                             {
                                 uint32_t utg = it_path->second.utg_nodes[k];
                                 contig_chain[orig_idx].utg_path_node.push_back(utg);
 
-
+                            
                                 contig_chain[orig_idx].node_positions[utg] = current_offset + it_path->second.utg_starts[k];
                             }
                         }
                         else
-                        {
+                        { 
                             for (size_t k = 0; k < it_path->second.utg_nodes.size(); ++k)
                             {
                                 size_t rev_k = it_path->second.utg_nodes.size() - 1 - k;
                                 uint32_t utg = it_path->second.utg_nodes[rev_k] ^ 1;
                                 contig_chain[orig_idx].utg_path_node.push_back(utg);
 
-
+                             
                                 uint32_t rev_pos = current_offset + (it_path->second.ctg_length - it_path->second.utg_starts[rev_k]);
                                 contig_chain[orig_idx].node_positions[utg] = rev_pos;
                             }
@@ -20888,7 +20306,7 @@ void get_haplotype_path_now(
                 }
             }
 
-
+           
             for (size_t i = 0; i < m * 2; i++)
             {
                 free(connect_small[i]);
@@ -20899,10 +20317,6 @@ void get_haplotype_path_now(
     }
 
     if (!split_flagged_chains(contig_chain, contig_paths, g_params))
-        return;
-    if (!auto_correct_chains(contig_chain, contig_paths,
-                             connection_count_forward, connection_count_backward,
-                             string(output_directory), g_params))
         return;
 
     std::cout << "\n=== Contig Chain new Information ===" << std::endl;
@@ -20921,12 +20335,12 @@ void get_haplotype_path_now(
         std::cerr << "  Paired with chain index: "
                   << (chain.other_index != UINT32_MAX ? std::to_string(chain.other_index) : "NONE") << std::endl;
 
-
+        
         std::cerr << "  Begin node: " << chain.beg_node << std::endl;
         std::cerr << "  End node: " << chain.end_node << std::endl;
         std::cerr << "  Path length: " << chain.path_length << " bp" << std::endl;
 
-
+       
         std::cerr << "  UTG path nodes (" << chain.utg_path_node.size() << " nodes): ";
         for (size_t j = 0; j < std::min((size_t)10, chain.utg_path_node.size()); j++)
         {
@@ -20942,7 +20356,7 @@ void get_haplotype_path_now(
         }
         std::cerr << std::endl;
 
-
+       
         if (!chain.node_positions.empty())
         {
             std::cerr << "  Node positions (first " << std::min((size_t)3, chain.node_positions.size()) << "): ";
@@ -20964,7 +20378,7 @@ void get_haplotype_path_now(
             std::cerr << std::endl;
         }
 
-
+       
         if (!chain.contig_info_output.empty())
         {
             std::cerr << "  Contig info (" << chain.contig_info_output.size() << " contigs): ";
@@ -20984,13 +20398,13 @@ void get_haplotype_path_now(
             // }
             std::cerr << std::endl;
         }
-
+      
         cerr << "Now is done" << endl;
     }
 
     std::cout << "\n=== Summary ===" << std::endl;
 
-
+   
 
     std::string out_dir_str = output_directory;
     if (!out_dir_str.empty() && out_dir_str.back() != '/')
@@ -21005,7 +20419,7 @@ void get_haplotype_path_now(
     std::ofstream outPhasingHap2(fa_hap2_filename);
     std::ofstream outScaffold1(txt_filename1);
 
-
+   
     if (!outPhasingHap1.is_open() || !outPhasingHap2.is_open())
     {
         std::cerr << "[Error] Failed to open FASTA files for writing." << std::endl;
@@ -21018,10 +20432,10 @@ void get_haplotype_path_now(
     {
         int valid_count = 0;
 
-
+       
         for (const auto &chain : contig_chain)
         {
-
+           
             if (chain.path_length == 0 || !chain.haplo_sequences || chain.contig_info_output.empty())
             {
                 continue;
@@ -21030,12 +20444,12 @@ void get_haplotype_path_now(
             std::string first_name = chain.contig_info_output[0].first;
             size_t sub_contig_count = chain.contig_info_output.size();
 
-
+           
             std::string scaffold_id = first_name + "_" + std::to_string(sub_contig_count);
 
             outScaffold1 << scaffold_id << ":";
 
-
+          
             int hap1_count = 0;
             int hap2_count = 0;
 
@@ -21048,7 +20462,7 @@ void get_haplotype_path_now(
                     outScaffold1 << ",";
                 }
 
-
+                
                 if (ctg_name.find("hap1") != std::string::npos || ctg_name.find("h1") != std::string::npos)
                 {
                     hap1_count++;
@@ -21060,7 +20474,7 @@ void get_haplotype_path_now(
             }
             outScaffold1 << "\n";
             std::string seq_str = *(chain.haplo_sequences);
-
+           
             if (hap1_count >= hap2_count)
             {
                 outPhasingHap1 << ">" << scaffold_id << "_hap1\n";
@@ -21088,7 +20502,7 @@ void get_haplotype_path_now(
     outFileFiltered2.open(string(output_directory) + string("/scaffold.fa"), ofstream::out | ofstream::trunc);
     ofstream outFileFiltered3;
 
-
+  
     std::unordered_set<std::string> all_visited_set;
     for (const auto &name : visited_contigs_in_hap)
     {
@@ -21101,7 +20515,7 @@ void get_haplotype_path_now(
 
     std::cout << "Starting to process unvisited contigs..." << std::endl;
 
-
+   
     int unvisited_total_count = 0;
     int exported_to_fa_count = 0;
     int added_to_chain_count = 0;
@@ -21110,16 +20524,16 @@ void get_haplotype_path_now(
     std::string unvisited_txt_path = std::string(output_directory) + "/un_visited_contig.txt";
     std::ofstream outUnvisitedTxt(unvisited_txt_path);
 
-
+  
     for (const auto &it : contig_paths)
     {
         const std::string &contig_name = it.first;
         const auto &contig_info = it.second;
 
-
+     
         if (all_visited_set.find(contig_name) == all_visited_set.end())
         {
-
+         
             std::string sequence = contig_info.ctg_seq;
             if (sequence.empty())
             {
@@ -21127,7 +20541,7 @@ void get_haplotype_path_now(
                 continue;
             }
 
-
+          
             if (unvisited_total_count > 0)
             {
                 outUnvisitedTxt << ",";
@@ -21136,47 +20550,47 @@ void get_haplotype_path_now(
             unvisited_total_count++;
             total_unvisited_len += contig_info.ctg_length;
 
-
+         
             if (contig_info.ctg_length > g_params.chain_len_threshold)
             {
                 contig_chains new_chain;
-
-
-                new_chain.index = contig_chain.size();
-
-
+                
+             
+                new_chain.index = contig_chain.size(); 
+                
+              
                 new_chain.other_index = 0xFFFFFFFF;
                 new_chain.is_paired = false;
-
-
+                
+                
                 new_chain.path_length = contig_info.ctg_length;
-
-
+                
+             
                 new_chain.haplo_sequences = new string(sequence);
-
-
+                
+               
                 new_chain.contig_info_output.push_back({contig_name, true});
-
-
-                new_chain.beg_node = 0;
+                
+               
+                new_chain.beg_node = 0; 
                 new_chain.end_node = 0;
                 new_chain.group_id = 0;
                 new_chain.group_id_new = 0;
 
-
+            
                 contig_chain.push_back(new_chain);
-
-                std::cerr << "[Info] Super Contig " << contig_name << " (len: " << contig_info.ctg_length
+                
+                std::cerr << "[Info] Super Contig " << contig_name << " (len: " << contig_info.ctg_length 
                           << ") > 12M, added to contig_chain as index " << new_chain.index << ".\n";
                 added_to_chain_count++;
             }
-
+         
             else if (contig_info.ctg_length > g_params.scaffold_len_threshold)
             {
                 outFileFiltered2 << ">" << contig_name << "\n";
                 outFileFiltered2 << sequence << "\n";
                 std::cerr << contig_name << " , in scaffold.fa and length is " << contig_info.ctg_length << "\n";
-                exported_to_fa_count++;
+                exported_to_fa_count++; 
             }
         }
     }
@@ -21187,7 +20601,7 @@ void get_haplotype_path_now(
 
 
 
-
+  
     uint32_t **connect_num11;
     connect_num11 = (uint32_t **)calloc(contig_chain.size() * 2, sizeof(uint32_t *));
     for (size_t i = 0; i < contig_chain.size() * 2; i++)
@@ -21233,8 +20647,7 @@ void get_haplotype_path_now(
         }
     // }
 
-    if (g_params.global_scaffolding_mode == "mcl" ||
-        g_params.global_scaffolding_mode == "haphic")
+    if (g_params.global_scaffolding_mode == "mcl")
     {
         cerr << "[MCL] Starting pair-aware chromosome clustering and global scaffolding.\n";
         bool ok = run_pair_aware_mcl_scaffolding(contig_chain, connect_num11, graph,
@@ -21254,7 +20667,7 @@ void get_haplotype_path_now(
             cerr << "[MCL::ERROR] Global scaffolding failed; use --global-scaffolding legacy to run the old method.\n";
         return;
     }
-
+   
     cerr << "output scaffold map" << endl;
     // ofstream outFileScaffoldSimple;
     // outFileScaffoldSimple.open(string(output_directory) + string("/scaffold_connection_simp.txt"), ofstream::out | ofstream::trunc);
@@ -21278,9 +20691,9 @@ void get_haplotype_path_now(
     // }
     // outFileScaffoldSimple.close();
 
-
+   
     std::vector<std::string> contig_names;
-    for (int i = 0; i < contig_chain.size() * 2; i += 2)
+    for (int i = 0; i < contig_chain.size() * 2; i += 2) // 每2个一组（+和-）
     {
         const auto &chain = contig_chain[i >> 1];
         if (contig_chain[i >> 1].contig_info_output.size() > 0)
@@ -21293,36 +20706,36 @@ void get_haplotype_path_now(
         }
     }
 
-    int num_contigs_with_direction = contig_names.size();
+    int num_contigs_with_direction = contig_names.size(); 
     std::vector<std::vector<uint32_t>> connection_matrix(num_contigs_with_direction,
                                                          std::vector<uint32_t>(num_contigs_with_direction, 0));
 
-
+  
     for (int row = 0; row < num_contigs_with_direction; row++)
     {
 
         for (int col = 0; col < num_contigs_with_direction; col++)
         {
-
+          
             uint32_t strength = connect_num11[row][col];
             connection_matrix[row][col] = strength;
         }
     }
-
-
+    
+    // 第二部分：输出过滤后的连接
     ofstream outFileFiltered;
     outFileFiltered.open(string(output_directory) + string("/scaffold_connection_filter.txt"),
                          ofstream::out | ofstream::trunc);
 
-
-
+   
+  
     int printed_count = 0;
     for (int row = 0; row < num_contigs_with_direction; row++)
     {
         for (int col = 0; col < num_contigs_with_direction; col++)
         {
             uint32_t strength = connection_matrix[row][col];
-
+           
             if (strength > 50)
             {
                 // std::cout << contig_names[row] << "\t"
@@ -21335,9 +20748,9 @@ void get_haplotype_path_now(
     std::cout << "Total valid sparse connections printed: " << printed_count << std::endl;
     std::cout << "=====================================================\n"
               << std::endl;
+  
 
-
-
+   
     outFileFiltered << "\n\nFiltered Detailed Pair Information (All connections):\n";
     outFileFiltered << "Contig1\tContig2\tStrength\tDirection1\tDirection2\n";
 
@@ -21347,14 +20760,14 @@ void get_haplotype_path_now(
     uint32_t min_strength = UINT32_MAX;
     int above_threshold = 0;
 
-
+  
     for (int i = 0; i < num_contigs_with_direction; i++)
     {
         for (int j = 0; j < num_contigs_with_direction; j++)
         {
             uint32_t strength = connect_num11[i][j];
 
-
+           
             total_strength += strength;
             if (strength > max_strength)
                 max_strength = strength;
@@ -21363,15 +20776,15 @@ void get_haplotype_path_now(
             if (strength > 5000)
                 above_threshold++;
 
-
+           
             string name_i = contig_names[i];
             string name_j = contig_names[j];
 
-
+           
             string dir_i = name_i.substr(name_i.size() - 1);
             string dir_j = name_j.substr(name_j.size() - 1);
 
-
+           
             string base_name_i = name_i.substr(0, name_i.size() - 1);
             string base_name_j = name_j.substr(0, name_j.size() - 1);
 
@@ -21383,7 +20796,7 @@ void get_haplotype_path_now(
 
             strong_connections++;
 
-
+          
             if (strong_connections % 10000 == 0)
             {
                 outFileFiltered.flush();
@@ -21404,11 +20817,11 @@ void get_haplotype_path_now(
     outFileFiltered << "Connections with strength > 5000: " << above_threshold << "\n";
     outFileFiltered << "Percentage above threshold: " << (strong_connections > 0 ? (double)above_threshold * 100 / strong_connections : 0) << "%\n";
 
-
+  
 
     outFileFiltered << "Rank\tContig1\tContig2\tStrength\tDirection1\tDirection2\n";
 
-
+  
     vector<pair<uint32_t, pair<int, int>>> top_connections; // (strength, (i, j))
 
 
@@ -21418,7 +20831,7 @@ void get_haplotype_path_now(
         {
             uint32_t strength = connect_num11[i][j];
             if (strength > 0)
-            {
+            { 
                 top_connections.push_back({strength, {i, j}});
             }
         }
@@ -21434,18 +20847,18 @@ void get_haplotype_path_now(
                     top_connections.end(),
                     greater<pair<uint32_t, pair<int, int>>>());
 
-
+      
         sort(top_connections.begin(), top_connections.end(),
              greater<pair<uint32_t, pair<int, int>>>());
     }
     else
     {
-
+       
         sort(top_connections.begin(), top_connections.end(),
              greater<pair<uint32_t, pair<int, int>>>());
     }
 
-
+   
     int rank = 1;
     for (const auto &conn : top_connections)
     {
@@ -21479,18 +20892,18 @@ void get_haplotype_path_now(
     int chr_n = 23;
     outFileFiltered << "Chromosome\tContig1\tContig2\tStrength\tDirection1\tDirection2\tGroupID\n";
 
+ 
 
-
-
+   
     outFileFiltered3.open(string(output_directory) + string("/scaffold_contig.txt"), ofstream::out | ofstream::trunc);
-
+   
     int target_limit = n_chrs * 2 - 4;
     int current_count = num_contigs_with_direction;
 
+ 
 
-
-
-    double threshold_ratio = 0.2;
+    
+    double threshold_ratio = 0.2; // 系数，可调整
     uint32_t dynamic_threshold = 0;
 
     {
@@ -21509,7 +20922,7 @@ void get_haplotype_path_now(
                     current_max = connect_num11[i][j];
                 }
             }
-
+          
             if (current_max > 0)
             {
                 sum_max_signals += current_max;
@@ -21522,29 +20935,29 @@ void get_haplotype_path_now(
             double avg_max_signal = (double)sum_max_signals / count_valid_nodes;
             dynamic_threshold = (uint32_t)(avg_max_signal * hic_scaffold_threshold_ratio);
 
-
+           
             std::cout << "[Info] Dynamic Threshold: " << dynamic_threshold << std::endl;
         }
         else
         {
-
+            
         }
     }
     // ========================================================================
 
     if (current_count <= target_limit)
     {
-
+       
         int scaffold_count = 0;
         for (int i = 0; i < contig_chain.size(); ++i)
         {
-
+            
 
             scaffold_count++;
-
+           
             outFileFiltered2 << ">Scaffold_" << scaffold_count << "_" << contig_chain[i].contig_info_output[0].first << "\n";
 
-
+         
             outFileFiltered2 << *(contig_chain[i].haplo_sequences) << "\n";
 
             outFileFiltered3 << "Scaffold_" << scaffold_count << endl;
@@ -21554,28 +20967,28 @@ void get_haplotype_path_now(
             }
         }
 
+       
 
-
-
+      
     }
     else
     {
-
-
+       
+     
         std::set<int> merged_indices;
 
-
+     
         std::set<int> tried_indices;
 
         int temp_count = current_count;
 
-
+      
         while (temp_count > target_limit)
         {
             uint32_t min_len = 0xFFFFFFFF;
             int shortest_chain_idx = -1;
 
-
+         
             for (int i = 0; i < contig_chain.size(); ++i)
             {
                 if (merged_indices.find(i) == merged_indices.end() &&
@@ -21591,31 +21004,31 @@ void get_haplotype_path_now(
 
             if (shortest_chain_idx == -1)
             {
-
-                break;
+               
+                break; 
             }
 
-
+          
             uint32_t max_strength = 0;
-            int best_left_port = -1;
+            int best_left_port = -1; 
             int best_right_port = -1;
-
-
+            
+           
             for (int my_side = 0; my_side < 2; ++my_side)
             {
                 int short_port = shortest_chain_idx * 2 + my_side;
 
-
+             
                 for (int other_port = 0; other_port < num_contigs_with_direction; ++other_port)
                 {
                     int other_chain_idx = other_port / 2;
 
-
+                  
                     if (other_chain_idx == shortest_chain_idx) continue;
                     if (merged_indices.find(other_chain_idx) != merged_indices.end()) continue;
                     if (contig_chain[other_chain_idx].other_index == contig_chain[shortest_chain_idx].index) continue;
 
-
+                 
                     if (connect_num11[short_port][other_port] > max_strength)
                     {
                         max_strength = connect_num11[short_port][other_port];
@@ -21623,7 +21036,7 @@ void get_haplotype_path_now(
                         best_right_port = other_port;
                     }
 
-
+   
                     if (connect_num11[other_port][short_port] > max_strength)
                     {
                         max_strength = connect_num11[other_port][short_port];
@@ -21633,31 +21046,31 @@ void get_haplotype_path_now(
                 }
             }
 
-
+           
             if (best_left_port != -1 && max_strength > dynamic_threshold)
             {
                 int left_chain_idx = best_left_port / 2;
                 int right_chain_idx = best_right_port / 2;
 
-
+             
                 int partner_chain_idx = (left_chain_idx == shortest_chain_idx) ? right_chain_idx : left_chain_idx;
 
                 string left_name = contig_names[best_left_port];
                 string right_name = contig_names[best_right_port];
 
-
+            
 
                 string left_seq = *(contig_chain[left_chain_idx].haplo_sequences);
                 auto left_info = contig_chain[left_chain_idx].contig_info_output;
-
+                
                 string right_seq = *(contig_chain[right_chain_idx].haplo_sequences);
                 auto right_info = contig_chain[right_chain_idx].contig_info_output;
 
-
+               
                 bool left_is_rev = (best_left_port % 2 == 0);
                 if (left_is_rev)
                 {
-
+                   
                     left_seq = complement(left_seq);
                     std::reverse(left_info.begin(), left_info.end());
                     for (auto &info : left_info) info.second = !info.second;
@@ -21666,34 +21079,34 @@ void get_haplotype_path_now(
                 bool right_is_rev = (best_right_port % 2 == 1);
                 if (right_is_rev)
                 {
-
+                  
                     right_seq = complement(right_seq);
                     std::reverse(right_info.begin(), right_info.end());
                     for (auto &info : right_info) info.second = !info.second;
                 }
 
-
+               
                 string gap(100, 'N');
                 string final_seq = left_seq + gap + right_seq;
                 auto final_info = left_info;
                 final_info.insert(final_info.end(), right_info.begin(), right_info.end());
 
-
+               
                 *(contig_chain[partner_chain_idx].haplo_sequences) = final_seq;
                 contig_chain[partner_chain_idx].contig_info_output = final_info;
                 contig_chain[partner_chain_idx].path_length = final_seq.length();
 
+              
 
+                int exposed_left_port = best_left_port ^ 1;  
+              
+                int exposed_right_port = best_right_port ^ 1; 
 
-                int exposed_left_port = best_left_port ^ 1;
-
-                int exposed_right_port = best_right_port ^ 1;
-
-
-                int partner_new_head = partner_chain_idx * 2;
+              
+                int partner_new_head = partner_chain_idx * 2;     
                 int partner_new_tail = partner_chain_idx * 2 + 1;
 
-
+              
                 std::vector<uint32_t> new_head_row(num_contigs_with_direction, 0);
                 std::vector<uint32_t> new_head_col(num_contigs_with_direction, 0);
                 std::vector<uint32_t> new_tail_row(num_contigs_with_direction, 0);
@@ -21706,20 +21119,20 @@ void get_haplotype_path_now(
                     new_tail_col[i] = connect_num11[i][exposed_right_port];
                 }
 
-
+             
                 for (int i = 0; i < num_contigs_with_direction; ++i) {
-
+                    
                     connect_num11[best_left_port][i] = 0; connect_num11[i][best_left_port] = 0;
                     connect_num11[best_right_port][i] = 0; connect_num11[i][best_right_port] = 0;
-
-
+                    
+                    
                     int short_port_0 = shortest_chain_idx * 2;
                     int short_port_1 = shortest_chain_idx * 2 + 1;
                     connect_num11[short_port_0][i] = 0; connect_num11[i][short_port_0] = 0;
                     connect_num11[short_port_1][i] = 0; connect_num11[i][short_port_1] = 0;
                 }
 
-
+              
                 for (int i = 0; i < num_contigs_with_direction; ++i) {
                     connect_num11[partner_new_head][i] = new_head_row[i];
                     connect_num11[i][partner_new_head] = new_head_col[i];
@@ -21727,34 +21140,34 @@ void get_haplotype_path_now(
                     connect_num11[i][partner_new_tail] = new_tail_col[i];
                 }
 
-
+              
                 tried_indices.erase(partner_chain_idx);
-
+             
                 merged_indices.insert(shortest_chain_idx);
-                temp_count -= 2;
+                temp_count -= 2; 
             }
             else
             {
-
+               
                 tried_indices.insert(shortest_chain_idx);
                 target_limit += 2;
-
+                
             }
         }
 
 
-
+       
         int scaffold_count = 0;
         for (int i = 0; i < contig_chain.size(); ++i)
         {
-
+           
             if (merged_indices.find(i) == merged_indices.end())
             {
                 scaffold_count++;
-
+              
                 outFileFiltered2 << ">Scaffold_" << scaffold_count << "_" << contig_chain[i].contig_info_output[0].first << "\n";
 
-
+              
                 outFileFiltered2 << *(contig_chain[i].haplo_sequences) << "\n";
 
                 outFileFiltered3 << "Scaffold_" << scaffold_count << endl;
@@ -21765,12 +21178,12 @@ void get_haplotype_path_now(
             }
         }
 
-
+      
     }
 
+ 
 
-
-
+ 
     if (outUnvisitedTxt.is_open())
     {
         outUnvisitedTxt << "\nTotal Unvisited Count: " << unvisited_total_count
@@ -21778,12 +21191,12 @@ void get_haplotype_path_now(
         outUnvisitedTxt.close();
     }
 
-
+  
     std::cout << "Found " << unvisited_total_count << " unvisited contigs in total." << std::endl;
     std::cout << "Exported " << exported_to_fa_count << " contigs (passed length filter) to scaffold.fa." << std::endl;
 
     outFileFiltered2.close();
-
+   
     std::unordered_map<uint32_t, std::vector<size_t>> groups_id_new;
     for (size_t idx = 0; idx < contig_chain.size(); idx++)
     {
@@ -21794,7 +21207,7 @@ void get_haplotype_path_now(
         }
     }
 
-
+ 
     std::vector<uint32_t> sorted_group_ids;
     for (const auto &pair : groups_id_new)
     {
@@ -21802,10 +21215,10 @@ void get_haplotype_path_now(
     }
     std::sort(sorted_group_ids.begin(), sorted_group_ids.end());
 
-
+   
     std::unordered_set<std::string> selected_contigs;
 
-
+   
     int output_count = contig_chain.size() / 2;
     for (uint32_t group_id : sorted_group_ids)
     {
@@ -21815,19 +21228,19 @@ void get_haplotype_path_now(
         const auto &group_chains = groups_id_new[group_id];
         if (group_chains.size() < 2)
         {
-
+           
             cout << "group_id: " << group_id << " has less than 2 chains" << endl;
             continue;
         }
 
-
+      
         size_t idx1 = group_chains[0];
         size_t idx2 = (group_chains.size() > 1) ? group_chains[1] : idx1;
 
         const auto &chain1 = contig_chain[idx1];
         const auto &chain2 = contig_chain[idx2];
         cout << "Processing group_id: " << group_id << " with chains " << chain1.index << " and " << chain2.index << endl;
-
+       
         std::string contig1_name, contig2_name;
         if (!chain1.contig_info_output.empty())
         {
@@ -21838,20 +21251,20 @@ void get_haplotype_path_now(
             contig2_name = chain2.contig_info_output[0].first;
         }
 
-
+       
         if (contig1_name.empty() || contig2_name.empty())
         {
             continue;
         }
 
-
+      
         if (selected_contigs.find(contig1_name) != selected_contigs.end() ||
             selected_contigs.find(contig2_name) != selected_contigs.end())
         {
             continue;
         }
 
-
+     
         int contig1_base_idx = -1, contig2_base_idx = -1;
         for (int i = 0; i < num_contigs_with_direction; i += 2)
         {
@@ -21864,15 +21277,15 @@ void get_haplotype_path_now(
 
         if (contig1_base_idx == -1 || contig2_base_idx == -1)
         {
-
+          
             continue;
         }
 
-
+       
         uint32_t max_strength = 0;
         int best_i = -1, best_j = -1;
 
-
+       
         for (int dir1 = 0; dir1 < 2; dir1++)
         {
             for (int dir2 = 0; dir2 < 2; dir2++)
@@ -21895,7 +21308,7 @@ void get_haplotype_path_now(
 
         if (max_strength > 0)
         {
-
+           
             string name_i = contig_names[best_i];
             string name_j = contig_names[best_j];
 
@@ -21913,7 +21326,7 @@ void get_haplotype_path_now(
                             << dir_j << "\t"
                             << group_id << "\n";
 
-
+          
             selected_contigs.insert(contig1_name);
             selected_contigs.insert(contig2_name);
 
@@ -21924,11 +21337,11 @@ void get_haplotype_path_now(
         }
     }
 
-
+    
 
     cerr << "Total " << output_count << " chromosome connections selected" << endl;
 
-
+   
     outFileFiltered.close();
 }
 
@@ -21961,14 +21374,14 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
     }
     // print_graph_edges(graph);
     std::unordered_map<std::string, ContigPath> contig_paths;
-    read_contig_csv(utg_ctg_file, hap1_gfa, hap2_gfa, contig_paths);
-    initialize_contig_paths(contig_paths, graph);
+    read_contig_csv(utg_ctg_file, hap1_gfa, hap2_gfa, contig_paths); // 调用读取函数
+    initialize_contig_paths(contig_paths, graph);                    // contig_paths 存入node值
     vector<vector<hap_chain_result_t>> hap_results = hap_results_debug;
     vector<vector<uint32_t>> unvisited_nodes = unvisited_nodes_global;
     match_hap_results_with_contigs(hap_results, unvisited_nodes, contig_paths, graph, connection_count_forward, connection_count_backward, output_directory);
     // TODO:
     auto bubble_chain_results = update_bubble_chain_paths(bubble_chains, named_bubble_contigs, graph);
-
+    // 对每个 component 去除 begin-end 相同的重复项
     for (size_t comp = 0; comp < bubble_chain_results.size(); ++comp)
     {
         std::set<std::pair<string, string>> seen_pairs;
@@ -21978,15 +21391,15 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
         {
             auto key = std::make_pair(graph->seq[bc.begin >> 1].name, graph->seq[bc.end >> 1].name);
             if (seen_pairs.count(key))
-                continue;
+                continue; // 重复，跳过
             seen_pairs.insert(key);
             unique_results.push_back(bc);
         }
 
-
+        // 替换原始数据为去重后的内容
         bubble_chain_results[comp] = std::move(unique_results);
     }
-
+    // 输出结果进行验证
     for (size_t comp = 0; comp < bubble_chain_results.size(); ++comp)
     {
         std::cout << ">>> Component " << comp << ":\n";
@@ -22025,11 +21438,11 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
     //             }
     //         }
 
-
+    //         // 获取 begin node 和 end node 的名字
     //         string beg_node_name = graph->seq[bubble->begNode / 2].name;
     //         string end_node_name = graph->seq[bubble->endNode / 2].name;
 
-
+    //         // 判断是 pure 还是 complex 并输出信息
     //         if (nodes.size() > 50)
     //         {
     //             complex_bubbles.push_back(bubble);
@@ -22047,7 +21460,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
     //                  << ", Type: pure" << endl;
     //         }
 
-
+    //         // 输出包含的 node 节点
     //         if (nodes.size() >= 1)
     //         {
     //             cout << "Contained Nodes: ";
@@ -22244,23 +21657,23 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
 
     // map<int, vector<int>> component_step_map; // component_id -> list of step index
 
-
+    // // 遍历 step 中的所有路径
     // for (size_t step_idx = 0; step_idx < step.beg_node->size(); ++step_idx)
     // {
     //     uint32_t beg = (*step.beg_node)[step_idx];
     //     uint32_t end = (*step.end_node)[step_idx];
     //     set<uint32_t> &nodes = (*step.current_nodes)[step_idx];
 
-
+    //     // 在所有 component 中查找匹配的路径
     //     for (size_t comp_id = 0; comp_id < bubble_chains.size(); ++comp_id)
     //     {
     //         for (auto &bc : bubble_chains[comp_id])
     //         {
-
+    //             // 找到和该 step 匹配的 bubble chain（通过起止节点判断）
     //             if (bc.begin == beg && bc.end == end)
     //             {
     //                 component_step_map[comp_id].push_back(step_idx);
-
+    //                 break; // 一个 step 只属于一个 component
     //             }
     //         }
     //     }
@@ -22285,7 +21698,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
     // cout << "step.beg_node->size(): " << step.beg_node->size() << endl;
     // std::vector<std::vector<bubble_contig>> bubble_contigs(bubble_chains.size());
 
-
+    // // 2. 构造 beg_node 到 component index 的映射
     // unordered_map<uint32_t, size_t> beg_node_to_component;
     // for (size_t comp_idx = 0; comp_idx < bubble_chains.size(); ++comp_idx)
     // {
@@ -22295,7 +21708,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
     //     }
     // }
 
-
+    // // 3. 遍历 step.beg_node，构造 bubble_contig 插入对应 component
     // for (size_t i = 0; i < step.beg_node->size(); ++i)
     // {
     //     uint32_t beg = (*step.beg_node)[i];
@@ -22320,11 +21733,11 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
     //     bubble_contigs[comp_idx].push_back(bc);
     // }
 
-
-
+    // //.........................................将结构转为bubble_chain_results........................................................
+    // // 创建 bubble_chain_result 的二维结构，维度与 bubble_chains 一致
     // std::vector<std::vector<bubble_chain_result>> bubble_chain_results1(bubble_chains.size());
     // cout << "Start to convert bubble_chains to bubble_chain_results" << endl;
-
+    // // 2. 构造 beg_node 到 component index 的映射
     // unordered_map<uint32_t, size_t> beg_node_to_component1;
     // for (size_t comp_idx = 0; comp_idx < bubble_chains.size(); ++comp_idx)
     // {
@@ -22334,7 +21747,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
     //     }
     // }
 
-
+    // // 3. 遍历 step.beg_node，构造 bubble_chain_result 插入对应 component
     // for (size_t i = 0; i < step.beg_node->size(); ++i)
     // {
     //     uint32_t beg = (*step.beg_node)[i];
@@ -22354,14 +21767,14 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
     //     bcr.begin = beg;
     //     bcr.end = end;
 
-
+    //     // 根据已有数据填充 hap_path 和 hap_seq
     //     bcr.hap_path1 = step.haplo_pathes[i * 2];
     //     bcr.hap_path2 = step.haplo_pathes[i * 2 + 1];
     //     bcr.hap1_seq = step.haplo_sequences[i * 2];
     //     bcr.hap2_seq = step.haplo_sequences[i * 2 + 1];
 
-
-
+    //     // 这里假设 hap_path 的第一个和最后一个元素就是 hap_begin / hap_end
+    //     // 如果 hap_path 为空，需要安全检查
     //     if (!bcr.hap_path1.empty())
     //     {
     //         bcr.hap1_begin = beg;
@@ -22369,7 +21782,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
     //     }
     //     else
     //     {
-
+    //         bcr.hap1_begin = bcr.hap1_end = UINT32_MAX; // 或者用 0
     //     }
     //     if (!bcr.hap_path2.empty())
     //     {
@@ -22381,15 +21794,15 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
     //         bcr.hap2_begin = bcr.hap2_end = UINT32_MAX;
     //     }
 
-
+    //     // 生成 nodes 集合（两个 hap_path 所有节点合并）
     //     bcr.nodes.insert(bcr.hap_path1.begin(), bcr.hap_path1.end());
     //     bcr.nodes.insert(bcr.hap_path2.begin(), bcr.hap_path2.end());
 
+    //     // 如果你有逻辑区分 is_bubble / is_hap_only，这里可以直接判断赋值
+    //     bcr.is_bubble = true;    // 占位
+    //     bcr.is_hap_only = false; // 占位
 
-
-
-
-
+    //     // 其它布尔标志位可以初始化
     //     bcr.hap_path1_arrived = false;
     //     bcr.hap_path2_arrived = false;
 
@@ -22397,7 +21810,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
     // }
 
     // print_bubble_contigs(bubble_contigs, graph);
-
+    // TODO: 写入hap_contig.fa
 
     ofstream out_hap_contig;
     out_hap_contig.open(string(output_directory) + "/hap_contig.fa", ofstream::out | ofstream::trunc);
@@ -22413,20 +21826,20 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
         {
             std::string fasta_name;
             fasta_name = "contig_" + std::to_string(hap_results_num++);
-
+            // 写入 FASTA 格式
             out_hap_contig << ">" << fasta_name << std::endl;
             out_hap_contig << hap_results[i][j].hap_sequence << std::endl;
         }
     }
     out_hap_contig.close();
 
-
+    // // 使用范围for循环，更简洁
     // for (const auto &contig_chains : visited_contigs_in_hap)
     // {
     //     out_file <<
     //     for (const auto &contig_name : contig_chains)
     //     {
-
+    //         out_file << contig_name << '\n'; // 使用'\n'而不是std::endl以提高性能
     //     }
     // }
 
@@ -22452,44 +21865,44 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
                        connections_count, components1, output_directory, contig_paths, group_contigs, connection_count_forward, connection_count_backward);
 
     cout << " contig_chain size: " << contig_chain.size() << endl;
-
+    // 步骤1：按 path_length 从长到短排序
     std::vector<size_t> sorted_indices(contig_chain.size());
-    std::iota(sorted_indices.begin(), sorted_indices.end(), 0);
+    std::iota(sorted_indices.begin(), sorted_indices.end(), 0); // 填充0,1,2,...
     std::sort(sorted_indices.begin(), sorted_indices.end(),
               [&contig_chain](size_t i, size_t j)
               {
                   return contig_chain[i].path_length > contig_chain[j].path_length;
               });
 
-
+    // 步骤2：初始化所有链的 group_id_new 为无效值
     for (auto &chain : contig_chain)
     {
-        chain.group_id_new = UINT32_MAX;
+        chain.group_id_new = UINT32_MAX; // 表示未分配新group
     }
 
-
+    // 步骤3：分配新的 group_id
     uint32_t new_group_counter = 0;
     std::vector<bool> processed(contig_chain.size(), false);
 
-
+    // 按长度从长到短处理
     for (size_t idx : sorted_indices)
     {
         auto &chain = contig_chain[idx];
 
-
+        // 如果已经处理过，跳过
         if (processed[idx])
             continue;
 
-
+        // 标记当前链为已处理
         processed[idx] = true;
 
-
+        // 分配新的group_id给当前链
         chain.group_id_new = new_group_counter;
 
-
+        // 检查是否有配对的链
         if (chain.is_paired && chain.other_index != UINT32_MAX)
         {
-
+            // 找到配对链的索引
             uint32_t partner_idx = UINT32_MAX;
             for (size_t i = 0; i < contig_chain.size(); i++)
             {
@@ -22502,7 +21915,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
 
             if (partner_idx != UINT32_MAX && !processed[partner_idx])
             {
-
+                // 分配相同的group_id给配对链
                 contig_chain[partner_idx].group_id_new = new_group_counter;
                 processed[partner_idx] = true;
 
@@ -22513,14 +21926,14 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
             }
             else
             {
-
+                // 如果配对链已处理或无效，当前链单独一个group
                 std::cerr << "New group " << new_group_counter << ": Chain " << chain.index
                           << " (len: " << chain.path_length << " bp) alone" << std::endl;
             }
         }
         else
         {
-
+            // 没有配对的链，单独一个group
             std::cerr << "New group " << new_group_counter << ": Chain " << chain.index
                       << " (len: " << chain.path_length << " bp) alone" << std::endl;
         }
@@ -22533,9 +21946,9 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
               {
                   if (a.group_id_new != b.group_id_new)
                   {
-                      return a.group_id_new < b.group_id_new;
+                      return a.group_id_new < b.group_id_new; // 先按 group_id_new 升序
                   }
-
+                  // group_id_new 相同，按 path_length 降序
                   return a.path_length > b.path_length;
               });
 
@@ -22555,12 +21968,12 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
         std::cerr << "  Paired with chain index: "
                   << (chain.other_index != UINT32_MAX ? std::to_string(chain.other_index) : "NONE") << std::endl;
 
-
+        // 节点信息
         std::cerr << "  Begin node: " << chain.beg_node << std::endl;
         std::cerr << "  End node: " << chain.end_node << std::endl;
         std::cerr << "  Path length: " << chain.path_length << " bp" << std::endl;
 
-
+        // UTG路径节点
         std::cerr << "  UTG path nodes (" << chain.utg_path_node.size() << " nodes): ";
         for (size_t j = 0; j < std::min((size_t)10, chain.utg_path_node.size()); j++)
         {
@@ -22576,7 +21989,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
         }
         std::cerr << std::endl;
 
-
+        // 节点位置信息
         if (!chain.node_positions.empty())
         {
             std::cerr << "  Node positions (first " << std::min((size_t)3, chain.node_positions.size()) << "): ";
@@ -22598,7 +22011,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
             std::cerr << std::endl;
         }
 
-
+        // Contig信息输出
         if (!chain.contig_info_output.empty())
         {
             std::cerr << "  Contig info (" << chain.contig_info_output.size() << " contigs): ";
@@ -22619,7 +22032,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
             std::cerr << std::endl;
         }
         // cerr<<"17135"<<endl;
-
+        //  // 序列信息（如果有）
         //  if (chain.haplo_sequences != nullptr)
         //  {
         //      std::cerr << "  Sequence: "
@@ -22631,7 +22044,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
 
     std::cout << "\n=== Summary ===" << std::endl;
 
-
+    // 统计配对情况
     uint32_t paired_count = 0;
     uint32_t unpaired_count = 0;
     for (const auto &chain : contig_chain)
@@ -22649,7 +22062,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
     std::cout << "Paired chains: " << paired_count << std::endl;
     std::cout << "Unpaired chains: " << unpaired_count << std::endl;
 
-
+    // 统计链长度分布
     if (!contig_chain.empty())
     {
         uint32_t min_length = UINT32_MAX;
@@ -22676,6 +22089,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
               << std::endl;
     // exit(0);
 
+    //** 建立contig_chain hic 信号矩阵 */
     uint32_t **connect_num11;
     connect_num11 = (uint32_t **)calloc(contig_chain.size() * 2, sizeof(uint32_t *));
     for (size_t i = 0; i < contig_chain.size() * 2; i++)
@@ -22702,7 +22116,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
         }
     }
     cout << endl;
-
+    // 从group_contigs中收集
     cout << "unvisited_contigs" << endl;
     for (const auto &group : group_contigs)
     {
@@ -22729,8 +22143,8 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
         {
             contig_chains_small_contig chain;
 
-
-            chain.utg_path_node = it->second.utg_nodes;
+            // 填充 UTG 节点路径
+            chain.utg_path_node = it->second.utg_nodes; // 假设 it->second 有 utg_path 成员
             chain.path_length = it->second.ctg_length;
             chain.contig_name = contig_name;
             chain.haplo_sequences = nullptr;
@@ -22740,9 +22154,9 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
             }
             else
             {
-
+                // 如果源序列为空，保持 nullptr 或者分配空字符串
                 chain.haplo_sequences = nullptr;
-
+                // 或者 chain.haplo_sequences = new std::string("");
             }
             for (int i = 0; i < it->second.utg_nodes.size(); i++)
             {
@@ -22759,20 +22173,20 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
         else
         {
             std::cerr << "Warning: No path found for contig " << contig_name << std::endl;
-
+            // // 添加一个空的chain
             // contig_chains_small_contig chain;
             // cstep_small_contig.contig_chains_ptr_small->push_back(chain);
         }
     }
     cstep_small_contig.contig_chains_ptr = &contig_chain;
-
+    // m行，n列
     size_t m = cstep_small_contig.contig_chains_ptr_small->size();
     size_t n = cstep_small_contig.contig_chains_ptr->size();
     std::cerr << "Initializing connect_small matrix: "
               << m << " small contigs × " << n << " existing contigs" << std::endl;
     std::cerr << "Matrix dimensions: " << m * 2 << " × " << n * 2 << std::endl;
 
-
+    // 分配 connect_small 矩阵内存
     uint32_t **connect_small = (uint32_t **)calloc(m * 2, sizeof(uint32_t *));
     if (!connect_small)
     {
@@ -22785,7 +22199,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
         if (!connect_small[i])
         {
             std::cerr << "Error: Failed to allocate connect_small row " << i << std::endl;
-
+            // 清理已分配的内存
             for (size_t j = 0; j < i; j++)
             {
                 free(connect_small[j]);
@@ -22795,7 +22209,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
         }
     }
 
-
+    // 将矩阵指针存入 cstep_small_contig
     cstep_small_contig.counting_result = connect_small;
     cstep_small_contig.connection_count_forward = connection_count_forward;
     cstep_small_contig.connection_count_backward = connection_count_backward;
@@ -22907,14 +22321,14 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
     // outFileScaffoldSimple.close();
 
     /* output scaffold  step */
-
+    // 首先处理原始连接矩阵
     ofstream outFileScaffold_1;
     outFileScaffold_1.open(string(output_directory) + string("/scaffold_connection_1.txt"),
                            ofstream::out | ofstream::trunc);
 
-
+    // 收集所有的contig名称（去重）
     std::vector<std::string> contig_names;
-    for (int i = 0; i < contig_chain.size() * 2; i += 2)
+    for (int i = 0; i < contig_chain.size() * 2; i += 2) // 每2个一组（+和-）
     {
         const auto &chain = contig_chain[i >> 1];
         if (contig_chain[i >> 1].contig_info_output.size() > 0)
@@ -22927,30 +22341,30 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
         }
     }
 
-    int num_contigs_with_direction = contig_names.size();
+    int num_contigs_with_direction = contig_names.size(); // 这是 n*2（正负方向都包括）
     std::vector<std::vector<uint32_t>> connection_matrix(num_contigs_with_direction,
                                                          std::vector<uint32_t>(num_contigs_with_direction, 0));
 
-
-    outFileScaffold_1 << "Contig Matrix (rows and columns are oriented contig names):\n\n";
+    // 输出完整的矩阵到文件 - 现在矩阵大小是 n*2 × n*2
+    outFileScaffold_1 << "Contig Matrix (行和列都是contig名称，包含正负方向):\n\n";
     outFileScaffold_1 << "Row/Col";
 
-
+    // 写入列标题（包含正负方向）
     for (int col = 0; col < num_contigs_with_direction; col++)
     {
         outFileScaffold_1 << "\t" << contig_names[col];
     }
     outFileScaffold_1 << "\n";
 
-
+    // 写入矩阵数据
     for (int row = 0; row < num_contigs_with_direction; row++)
     {
-        outFileScaffold_1 << contig_names[row];
+        outFileScaffold_1 << contig_names[row]; // 行标题
 
         for (int col = 0; col < num_contigs_with_direction; col++)
         {
-
-
+            // 获取连接强度
+            // 注意：经过上面的处理后，只有i为偶数（+方向）的位置有值
             uint32_t strength = connect_num11[row][col];
             connection_matrix[row][col] = strength;
 
@@ -22959,13 +22373,13 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
         outFileScaffold_1 << "\n";
     }
 
-    outFileScaffold_1 << "\n\nDetailed Pair Information (all orientation combinations):\n";
+    outFileScaffold_1 << "\n\nDetailed Pair Information (包含所有方向组合):\n";
     outFileScaffold_1 << "Contig1\tDirection1\tContig2\tDirection2\tStrength\n";
 
-
-
+    // // 输出详细的对信息（可选）
+    // for (int i = 0; i < len * 4; i += 2) // 只考虑+方向
     // {
-
+    //     for (int j = 0; j < len * 4; j += 2) // 只考虑+方向
     //     {
     //         if (connect_num[i][j] > 0)
     //         {
@@ -22984,26 +22398,26 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
     // outFileScaffold_1.close();
     // cout << "Scaffold connection matrix saved to scaffold_connection.txt" << endl;
 
-
+    // 第二部分：输出过滤后的连接
     ofstream outFileFiltered;
     outFileFiltered.open(string(output_directory) + string("/scaffold_connection_filter.txt"),
                          ofstream::out | ofstream::trunc);
 
-
+    // 输出过滤后的矩阵
     outFileFiltered << "Filtered Contig Matrix (Only connections > 5000):\n\n";
     outFileFiltered << "Row/Col";
 
-
+    // 写入列标题
     for (int col = 0; col < num_contigs_with_direction; col++)
     {
         outFileFiltered << "\t" << contig_names[col];
     }
     outFileFiltered << "\n";
 
-
+    // 写入过滤后的矩阵数据
     for (int row = 0; row < num_contigs_with_direction; row++)
     {
-        outFileFiltered << contig_names[row];
+        outFileFiltered << contig_names[row]; // 行标题
 
         for (int col = 0; col < num_contigs_with_direction; col++)
         {
@@ -23020,7 +22434,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
         outFileFiltered << "\n";
     }
 
-
+    // 输出过滤后的详细对信息
     outFileFiltered << "\n\nFiltered Detailed Pair Information (All connections):\n";
     outFileFiltered << "Contig1\tContig2\tStrength\tDirection1\tDirection2\n";
 
@@ -23030,14 +22444,14 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
     uint32_t min_strength = UINT32_MAX;
     int above_threshold = 0;
 
-
+    // 第一次遍历：输出所有连接并收集统计信息
     for (int i = 0; i < num_contigs_with_direction; i++)
     {
         for (int j = 0; j < num_contigs_with_direction; j++)
         {
             uint32_t strength = connect_num11[i][j];
 
-
+            // 统计信息
             total_strength += strength;
             if (strength > max_strength)
                 max_strength = strength;
@@ -23046,15 +22460,15 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
             if (strength > 5000)
                 above_threshold++;
 
-
+            // 输出所有连接
             string name_i = contig_names[i];
             string name_j = contig_names[j];
 
-
+            // 提取方向信息
             string dir_i = name_i.substr(name_i.size() - 1);
             string dir_j = name_j.substr(name_j.size() - 1);
 
-
+            // 去掉方向后缀的基础名称
             string base_name_i = name_i.substr(0, name_i.size() - 1);
             string base_name_j = name_j.substr(0, name_j.size() - 1);
 
@@ -23066,7 +22480,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
 
             strong_connections++;
 
-
+            // 每输出10000条记录刷新一次
             if (strong_connections % 10000 == 0)
             {
                 outFileFiltered.flush();
@@ -23077,7 +22491,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
 
     outFileFiltered.flush();
 
-
+    // 输出统计信息
     outFileFiltered << "\n\n=== Connection Statistics ===\n";
     outFileFiltered << "Total connections: " << strong_connections << "\n";
     outFileFiltered << "Total connection strength: " << total_strength << "\n";
@@ -23087,21 +22501,21 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
     outFileFiltered << "Connections with strength > 5000: " << above_threshold << "\n";
     outFileFiltered << "Percentage above threshold: " << (strong_connections > 0 ? (double)above_threshold * 100 / strong_connections : 0) << "%\n";
 
-
+    // 现在输出前N个最强的连接
 
     outFileFiltered << "Rank\tContig1\tContig2\tStrength\tDirection1\tDirection2\n";
 
-
+    // 使用vector来存储和排序
     vector<pair<uint32_t, pair<int, int>>> top_connections; // (strength, (i, j))
 
-
+    // 收集所有连接
     for (int i = 0; i < num_contigs_with_direction; i++)
     {
         for (int j = 0; j < num_contigs_with_direction; j++)
         {
             uint32_t strength = connect_num11[i][j];
             if (strength > 0)
-            {
+            { // 只考虑有连接的
                 top_connections.push_back({strength, {i, j}});
             }
         }
@@ -23109,7 +22523,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
 
     cerr << "Total non-zero connections found: " << top_connections.size() << endl;
 
-
+    // 使用nth_element进行部分排序，效率更高
     if (top_connections.size() > 100)
     {
         nth_element(top_connections.begin(),
@@ -23117,18 +22531,18 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
                     top_connections.end(),
                     greater<pair<uint32_t, pair<int, int>>>());
 
-
+        // 对前TOP_N个进行完整排序
         sort(top_connections.begin(), top_connections.end(),
              greater<pair<uint32_t, pair<int, int>>>());
     }
     else
     {
-
+        // 如果总数少于TOP_N，直接排序
         sort(top_connections.begin(), top_connections.end(),
              greater<pair<uint32_t, pair<int, int>>>());
     }
 
-
+    // 输出前N个最强的连接
     int rank = 1;
     for (const auto &conn : top_connections)
     {
@@ -23160,49 +22574,49 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
     int chr_n = 23;
     outFileFiltered << "Chromosome\tContig1\tContig2\tStrength\tDirection1\tDirection2\tGroupID\n";
 
-
+    // TODO: 收缩矩阵
 
     ofstream outFileFiltered2;
     outFileFiltered2.open(string(output_directory) + string("/scaffold.fa"), ofstream::out | ofstream::trunc);
 
-
+    // 定义目标数量：nchr * 2 - 4 (考虑到正负方向)
     int target_limit = n_chrs * 2 - 4;
     int current_count = num_contigs_with_direction;
 
-    outFileFiltered << "\n--- Clustering and merge decision statistics ---\n";
-    outFileFiltered << "Total oriented nodes: " << current_count << ", target: " << target_limit << "\n";
+    outFileFiltered << "\n--- 聚类与合并决策统计 ---\n";
+    outFileFiltered << "当前方向节点总数: " << current_count << ", 目标阈值: " << target_limit << "\n";
 
     if (current_count <= target_limit)
     {
+        // 情况 A: 数量不足，需要利用 small contig 聚类（这里由于你没给出 small contig 的具体结构，仅输出逻辑占位）
+        outFileFiltered << "决策: [情况 A] 节点数少于目标，启动 Small Contig 聚类逻辑...\n";
 
-        outFileFiltered << "Decision A: node count is within target; starting small-contig clustering.\n";
-
-
+        // 此处可以调用你之前定义的 counter_worker_single_step_small_contig 相关逻辑
         // ...
     }
     else
     {
+        // 情况 B: 数量过多，从最短的开始合并
+        outFileFiltered << "决策: [情况 B] 节点数超出目标，启动最短 Contig 优先合并策略...\n";
 
-        outFileFiltered << "Decision B: node count exceeds target; starting shortest-contig-first merging.\n";
-
-
+        // 记录哪些 contig 已经被“合并掉”了（物理消失）
         std::set<int> merged_indices;
 
-
+        // 记录哪些 contig 已经被“尝试过但失败了”（不再作为起始点，但依然存在）
         std::set<int> tried_indices;
 
         int temp_count = current_count;
 
-
+        // 循环直到数量降至目标阈值
         while (temp_count > target_limit)
         {
             uint32_t min_len = 0xFFFFFFFF;
             int shortest_chain_idx = -1;
 
-
+            // 1. 寻找当前未合并 且 未尝试失败 的最短 contig
             for (int i = 0; i < contig_chain.size(); ++i)
             {
-
+                // 既没被合并，也没被标记为“放弃治疗”
                 if (merged_indices.find(i) == merged_indices.end() &&
                     tried_indices.find(i) == tried_indices.end())
                 {
@@ -23216,11 +22630,11 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
 
             if (shortest_chain_idx == -1)
             {
-                outFileFiltered << "All remaining nodes failed merge attempts; stopping early.\n";
-                break;
+                outFileFiltered << "所有剩余节点均已尝试合并但失败，提前结束循环。\n";
+                break; // 所有能试的都试过了
             }
 
-
+            // 2. 寻找强度最高的伙伴
             uint32_t max_strength = 0;
             int best_partner_row_idx = -1;
             int my_best_row_idx = -1;
@@ -23245,7 +22659,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
                 }
             }
 
-
+            // 3. 执行合并与序列处理
             if (best_partner_row_idx != -1)
             {
                 int partner_chain_idx = best_partner_row_idx / 2;
@@ -23254,81 +22668,81 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
                 string partner_name = contig_names[best_partner_row_idx];
                 uint32_t partner_len = contig_chain[partner_chain_idx].path_length;
 
-
-                outFileFiltered << "Merge:  [" << my_name << " (len:" << min_len << ")] "
+                // 输出详细的链接信息
+                outFileFiltered << "合并指令: [" << my_name << " (len:" << min_len << ")] "
                                 << "---> [" << partner_name << " (len:" << partner_len << ")] "
-                                << "strength: " << max_strength << "\n";
+                                << "强度: " << max_strength << "\n";
 
-
-
+                // --- 物理序列拼接逻辑 ---
+                // 提取我方序列
                 string my_seq = *(contig_chain[shortest_chain_idx].haplo_sequences);
                 if (my_best_row_idx % 2 == 1)
-                {
+                { // 如果我方是 '-' 方向
                     my_seq = complement(my_seq);
                 }
 
-
+                // 提取伙伴序列引用（直接修改伙伴，使其可以继续被合并）
                 string &partner_seq_ref = *(contig_chain[partner_chain_idx].haplo_sequences);
 
-
-
-
+                // 如果伙伴是以 '-' 方向迎接，伙伴序列需要翻转吗？
+                // 按照 Scaffold 标准逻辑：Partner_Seq + 100N + My_Seq
+                // 这里我们假设 partner_seq 保持原有方向，My_seq 根据连接方式调整
 
                 string gap(100, 'N');
                 partner_seq_ref = partner_seq_ref + gap + my_seq;
 
-
+                // 更新伙伴的长度信息
                 contig_chain[partner_chain_idx].path_length = partner_seq_ref.length();
 
-
+                // 标记短的这个已经被合并消失了
                 merged_indices.insert(shortest_chain_idx);
                 temp_count -= 2;
             }
             else
             {
-                outFileFiltered << "Warning: shortest contig " << contig_names[shortest_chain_idx * 2] << " has no valid connection and remains independent.\n";
-
+                outFileFiltered << "警告: 最短 Contig " << contig_names[shortest_chain_idx * 2] << " 无有效连接，强制标记为独立。\n";
+                // 标记为已尝试，但 NOT merged
                 tried_indices.insert(shortest_chain_idx);
-
+                // 但不减 temp_count，因为它依然是一个独立的 scaffold
                 merged_indices.insert(shortest_chain_idx);
             }
         }
 
-
-        outFileFiltered << "\nMerging completed; writing final scaffolds.\n";
+        // 4. 结束后，输出所有剩余的序列（包括合并后的长序列和未参与合并的序列）
+        outFileFiltered << "\n合并结束，开始输出最终 Scaffold...\n";
         int scaffold_count = 0;
         for (int i = 0; i < contig_chain.size(); ++i)
         {
-
+            // 只有没被合并掉的索引才是最终的输出点
             if (merged_indices.find(i) == merged_indices.end())
             {
                 scaffold_count++;
-
+                // 1. 输出 FASTA 标题行
                 outFileFiltered2 << ">Scaffold_" << scaffold_count << "_" << contig_chain[i].contig_info_output[0].first << "\n";
 
-
-
+                // 2. 直接输出完整序列，不进行截断或分段
+                // 确保序列末尾有一个换行符，以便下一条序列的标题行从新行开始
                 outFileFiltered2 << *(contig_chain[i].haplo_sequences) << "\n";
             }
         }
 
-        outFileFiltered << "Wrote " << scaffold_count << " sequences to scaffold.fa\n";
+        outFileFiltered << "最终输出 " << scaffold_count << " 条序列至 scaffold.fa\n";
     }
 
     // ---------------------------------------------------------
-
+    //  输出未被访问的孤儿 Contig (Unvisited / Leftover Contigs)
     // ---------------------------------------------------------
 
-
+    // 1. 创建一个包含所有已访问 Contig 的汇总集合，以便快速查找
     std::unordered_set<std::string> all_visited_set;
 
-
+    // 将 visited_contigs_in_hap 加入集合
     for (const auto &name : visited_contigs_in_hap)
     {
         all_visited_set.insert(name);
     }
 
-
+    // 将 visited_set 加入集合
     for (const auto &name : visited_set)
     {
         all_visited_set.insert(name);
@@ -23342,51 +22756,51 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
     std::cout << "Starting to export unvisited contigs..." << std::endl;
     int unvisited_count = 0;
 
-
+    // 2. 遍历所有可用的 Contig (contig_paths 是全集)
     for (const auto &it : contig_paths)
     {
         const std::string &contig_name = it.first;
         const auto &contig_info = it.second;
 
-
+        // 3. 检查当前 Contig 是否在已访问集合中
         if (all_visited_set.find(contig_name) == all_visited_set.end())
         {
-
+            // 如果没找到，说明是未被使用的，需要输出
             unvisited_count++;
 
-
-
-
-
+            // 获取序列
+            // 注意：确保 ctg_seq 包含序列数据。
+            // 如果 ctg_seq 为空，你可能需要根据 utg_nodes 从 graph (g) 中重构，
+            // 但通常 contig_paths 里应该已经存好了。
             std::string sequence = contig_info.ctg_seq;
 
             if (sequence.empty())
             {
-
-
+                // 备用方案：如果字符串为空，尝试从 graph 指针恢复 (如果逻辑支持)
+                // 这里假设 sequence 不为空，或者打印警告
                 std::cerr << "[Warning] Unvisited contig " << contig_name << " has empty sequence, skipping." << std::endl;
                 continue;
             }
 
-
-
+            // 4. 写入 scaffold.fa
+            // 建议在名字后加标记，或者保持原名
             outFileFiltered2 << ">" << contig_name << "\n";
             outFileFiltered2 << sequence << "\n";
             cerr << contig_name << " , in scaffold.fa and length is " << contig_info.ctg_length << "\n";
-
+            // 为了防止重复处理，将其加入 visited (可选)
             all_visited_set.insert(contig_name);
         }
     }
 
     std::cout << "Exported " << unvisited_count << " unvisited contigs to scaffold.fa." << std::endl;
 
-
+    // 别忘了关闭文件流（如果这是最后一步）
     // outFileFiltered2.close();
 
     outFileFiltered2.close();
     // for (size_t idx = 0; idx < contig_chain.size() - chr_n; idx++)
 
-
+    // 首先按group_id_new对contig_chain进行分组
     std::unordered_map<uint32_t, std::vector<size_t>> groups_id_new;
     for (size_t idx = 0; idx < contig_chain.size(); idx++)
     {
@@ -23397,7 +22811,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
         }
     }
 
-
+    // 收集所有group_id_new并按从小到大排序
     std::vector<uint32_t> sorted_group_ids;
     for (const auto &pair : groups_id_new)
     {
@@ -23405,10 +22819,10 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
     }
     std::sort(sorted_group_ids.begin(), sorted_group_ids.end());
 
-
+    // 存储已选择的contig，避免重复选择
     std::unordered_set<std::string> selected_contigs;
 
-
+    // 输出前chr_n个group的连接
     int output_count = contig_chain.size() / 2;
     for (uint32_t group_id : sorted_group_ids)
     {
@@ -23418,19 +22832,19 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
         const auto &group_chains = groups_id_new[group_id];
         if (group_chains.size() < 2)
         {
-
+            // 如果group里少于2个contig，跳过
             cout << "group_id: " << group_id << " has less than 2 chains" << endl;
             continue;
         }
 
-
+        // 获取这个group中的两个contig（假设每个group正好有2个配对的contig）
         size_t idx1 = group_chains[0];
         size_t idx2 = (group_chains.size() > 1) ? group_chains[1] : idx1;
 
         const auto &chain1 = contig_chain[idx1];
         const auto &chain2 = contig_chain[idx2];
         cout << "Processing group_id: " << group_id << " with chains " << chain1.index << " and " << chain2.index << endl;
-
+        // 获取两个contig的名称（从contig_info_output获取第一个contig名称）
         std::string contig1_name, contig2_name;
         if (!chain1.contig_info_output.empty())
         {
@@ -23441,23 +22855,23 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
             contig2_name = chain2.contig_info_output[0].first;
         }
 
-
+        // 如果contig名称为空，跳过
         if (contig1_name.empty() || contig2_name.empty())
         {
             continue;
         }
 
-
+        // 检查是否已被选择过
         if (selected_contigs.find(contig1_name) != selected_contigs.end() ||
             selected_contigs.find(contig2_name) != selected_contigs.end())
         {
             continue;
         }
 
-
+        // 在contig_names中找到对应的索引（考虑正负方向）
         int contig1_base_idx = -1, contig2_base_idx = -1;
         for (int i = 0; i < num_contigs_with_direction; i += 2)
-        {
+        { // 只检查+方向
             string base_name = contig_names[i].substr(0, contig_names[i].size() - 1);
             if (base_name == contig1_name)
                 contig1_base_idx = i;
@@ -23467,15 +22881,15 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
 
         if (contig1_base_idx == -1 || contig2_base_idx == -1)
         {
-
+            // 没找到对应的contig索引，跳过
             continue;
         }
 
-
+        // 检查两个contig之间的连接强度
         uint32_t max_strength = 0;
         int best_i = -1, best_j = -1;
 
-
+        // 检查所有方向组合（0:+, 1:-）
         for (int dir1 = 0; dir1 < 2; dir1++)
         {
             for (int dir2 = 0; dir2 < 2; dir2++)
@@ -23498,7 +22912,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
 
         if (max_strength > 0)
         {
-
+            // 输出最强的连接
             string name_i = contig_names[best_i];
             string name_j = contig_names[best_j];
 
@@ -23516,7 +22930,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
                             << dir_j << "\t"
                             << group_id << "\n";
 
-
+            // 标记这两个contig已被选择
             selected_contigs.insert(contig1_name);
             selected_contigs.insert(contig2_name);
 
@@ -23527,17 +22941,17 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
         }
     }
 
-
+    // 如果选择的group数量不足chr_n，补充输出
     if (output_count < chr_n)
     {
-
+        // 从剩余的连接中选择最强的
         vector<tuple<uint32_t, int, int, string, string>> remaining_connections;
 
         for (int i = 0; i < num_contigs_with_direction; i += 2)
-        {
+        { // 只考虑+方向的contig
             string base_name_i = contig_names[i].substr(0, contig_names[i].size() - 1);
 
-
+            // 跳过已选择的contig
             if (selected_contigs.find(base_name_i) != selected_contigs.end())
             {
                 continue;
@@ -23547,13 +22961,13 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
             {
                 string base_name_j = contig_names[j].substr(0, contig_names[j].size() - 1);
 
-
+                // 跳过已选择的contig
                 if (selected_contigs.find(base_name_j) != selected_contigs.end())
                 {
                     continue;
                 }
 
-
+                // 找到两个contig之间的最强连接
                 uint32_t max_strength = 0;
                 int best_i_idx = -1, best_j_idx = -1;
 
@@ -23581,12 +22995,12 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
             }
         }
 
-
+        // 按强度降序排序
         sort(remaining_connections.begin(), remaining_connections.end(),
              [](const auto &a, const auto &b)
              { return get<0>(a) > get<0>(b); });
 
-
+        // 输出剩余的连接，直到达到chr_n个
         for (const auto &conn : remaining_connections)
         {
             if (output_count >= chr_n)
@@ -23598,7 +23012,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
             string base_name_i = get<3>(conn);
             string base_name_j = get<4>(conn);
 
-
+            // 检查是否已被选择（双重检查）
             if (selected_contigs.find(base_name_i) != selected_contigs.end() ||
                 selected_contigs.find(base_name_j) != selected_contigs.end())
             {
@@ -23631,7 +23045,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
 
     cerr << "Total " << output_count << " chromosome connections selected" << endl;
 
-
+    // 关闭文件
     outFileFiltered.close();
 
     // outFileFiltered << "\n\nSummary:\n";
@@ -23656,14 +23070,14 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
         int id = 0;
         const std::string &name = step11.current_contig_names[i].front();
 
-        if (name.rfind("h1", 0) == 0)
+        if (name.rfind("h1", 0) == 0) // 从位置0开始匹配"h1"
             id = 1;
         else if (name.rfind("h2", 0) == 0)
             id = 2;
         else
         {
             std::cerr << "[Warning] Unknown contig prefix: " << name << std::endl;
-            id = 0;
+            id = 0; // 或其他默认值
         }
         step11.node_positions[i].clear();
         cerr << "Start assemble_haplo_sequence" << endl;
@@ -23684,7 +23098,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
         if (contig_names.empty())
             continue;
 
-
+        // 拼接 contig 名称，中间用下划线
         std::string fasta_name;
         for (size_t j = 0; j < contig_names.size(); j++)
         {
@@ -23694,7 +23108,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
         }
         fasta_name += "_";
         fasta_name += (i % 2 == 0) ? "hap1" : "hap2";
-
+        // 写入 FASTA 格式
         outFA << ">" << fasta_name << std::endl;
         outFA << step11.haplo_sequences[i] << std::endl;
         step11.contig_name[i] = fasta_name;
@@ -23703,7 +23117,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
     // ......
 
     // --------------------------------------------------
-
+    // 检查 step11 各属性的 size 是否一致
     cerr << "\n[Debug] Checking step11 attribute sizes..." << endl;
 
     size_t len_nodes = step11.current_nodes_haplo ? step11.len : 0;
@@ -23723,7 +23137,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
     cerr << "contig_name: " << len_contig_name << endl;
 
     // --------------------------------------------------
-
+    // 找到实际有效的 contig 数量（即当前填充了数据的位置）
     size_t actual_len = 0;
     for (size_t i = 0; i < step11.len; i++)
     {
@@ -23732,7 +23146,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
     }
 
     // --------------------------------------------------
-
+    // 如果存在多余空间，则裁剪掉
     if (actual_len < step11.len)
     {
         cerr << "[Debug] Trimming step11 arrays from " << step11.len << " to " << actual_len << " entries" << endl;
@@ -23761,7 +23175,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
             }
         }
 
-
+        // 释放原数组
         delete[] step11.current_nodes_haplo;
         delete[] step11.node_positions;
         delete[] step11.current_nodes_haplo_have_ward;
@@ -23770,7 +23184,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
         delete[] step11.haplo_sequences;
         delete[] step11.contig_name;
 
-
+        // 赋值回 step11
         step11.current_nodes_haplo = tmp_nodes;
         step11.node_positions = tmp_positions;
         step11.current_nodes_haplo_have_ward = tmp_nodes_ward;
@@ -23783,7 +23197,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
 
     cerr << "[Debug] After trimming, step11.len = " << step11.len << endl;
 
-
+    //.......测试......
 
     uint32_t **connect_num;
     float **best_buddy;
@@ -23988,7 +23402,7 @@ void get_haplotype_path_12_3(uint32_t **connection_count_forward, uint32_t **con
     //     while (getline(infile, fileLine))
     //     {
     //         if (fileLine[0] == '@')
-
+    //             continue; // 跳过 SAM header 行
 
     //         istringstream iss(fileLine);
     //         iss >> contigName1 >> flag >> contigName2;
@@ -25475,32 +24889,32 @@ void get_haplotype_path_10_29(uint32_t **connection_count_forward, uint32_t **co
     //......
     // print_graph_edges(graph);
     std::unordered_map<std::string, ContigPath> contig_paths;
-
-
-    initialize_contig_paths(contig_paths, graph);
+    // read_contig_csv(utg_ctg_file, contig_paths); // 调用读取函数
+    // TODO:想清楚怎么做，今天搞完
+    initialize_contig_paths(contig_paths, graph); // contig_paths 存入node值
     //.....................................................................................................................
     // TODO: test
     vector<vector<hap_chain_result_t>> hap_results = hap_results_debug;
     vector<vector<uint32_t>> unvisited_nodes = unvisited_nodes_global;
     match_hap_results_with_contigs(hap_results, unvisited_nodes, contig_paths, graph, connection_count_forward, connection_count_backward, output_directory);
 
-
+    // Step1:: 拼接 contig paths
     //  std::vector<std::vector<std::string>> group_contigs(components1.size());
     // contig_for_phasing(bubble_chain_results1, graph, connections_count, components1, output_directory, contig_paths, group_contigs);
+    // Step2:: 替换contig paths 中的 bubble chains
 
-
-
+    // Step3:: hap chains 内部拼接
 
     // vector<vector<hap_chain_result_t>>hap_results =  hap_results_debug;
     // vector<vector<uint32_t>>unvisited_nodes = unvisited_nodes_global;
     // match_hap_results_with_contigs(hap_results, unvisited_nodes, contig_paths, graph);
     // match_and_extend_contigs(contig_paths, step, graph);
 
+    // TODO: 生成输出的bubble chains
 
-
-
+    //.............................................................test：将已有bubble phasing 信息直接导入......................................................................
     auto bubble_chain_results = update_bubble_chain_paths(bubble_chains, named_bubble_contigs, graph);
-
+    // 对每个 component 去除 begin-end 相同的重复项
     for (size_t comp = 0; comp < bubble_chain_results.size(); ++comp)
     {
         std::set<std::pair<string, string>> seen_pairs;
@@ -25510,15 +24924,15 @@ void get_haplotype_path_10_29(uint32_t **connection_count_forward, uint32_t **co
         {
             auto key = std::make_pair(graph->seq[bc.begin >> 1].name, graph->seq[bc.end >> 1].name);
             if (seen_pairs.count(key))
-                continue;
+                continue; // 重复，跳过
             seen_pairs.insert(key);
             unique_results.push_back(bc);
         }
 
-
+        // 替换原始数据为去重后的内容
         bubble_chain_results[comp] = std::move(unique_results);
     }
-
+    // 输出结果进行验证
     for (size_t comp = 0; comp < bubble_chain_results.size(); ++comp)
     {
         std::cout << ">>> Component " << comp << ":\n";
@@ -25535,7 +24949,7 @@ void get_haplotype_path_10_29(uint32_t **connection_count_forward, uint32_t **co
         }
     }
 
-
+    // Step1:: 拼接 contig paths
     std::vector<std::vector<std::string>> group_contigs(components1.size());
     new_count_step step11;
     uint32_t total_paths = contig_paths.size();
@@ -25552,7 +24966,7 @@ void get_haplotype_path_10_29(uint32_t **connection_count_forward, uint32_t **co
     cout << "step11.len :" << step11.len << endl;
     contig_for_phasing(step11, bubble_chain_results, graph, connections_count, components1, output_directory, contig_paths, group_contigs, connection_count_forward, connection_count_backward);
 
-
+    // TODO: 测试 找出的pair contig 有多少组
 
     //
     int N = step11.len * 2;
@@ -25622,21 +25036,21 @@ void get_haplotype_path_10_29(uint32_t **connection_count_forward, uint32_t **co
         int id = 0;
         const std::string &name = step11.current_contig_names[i].front();
 
-        if (name.rfind("h1", 0) == 0)
+        if (name.rfind("h1", 0) == 0) // 从位置0开始匹配"h1"
             id = 1;
         else if (name.rfind("h2", 0) == 0)
             id = 2;
         else
         {
             std::cerr << "[Warning] Unknown contig prefix: " << name << std::endl;
-            id = 0;
+            id = 0; // 或其他默认值
         }
         step11.node_positions[i].clear();
         // cerr << "Start assemble_haplo_sequence" << endl;
         step11.haplo_sequences[i] = assemble_haplo_sequence(graph, begin, end, id, &step11.current_nodes_haplo[i], &step11.node_positions[i]);
     }
     cerr << "End assemble_haplo_sequence" << endl;
-
+    // 假设前面已经生成 step11.haplo_sequences 和 step11.current_contig_names
 
     ofstream outFA;
     outFA.open(string(output_directory) + "/pre_haplotype.fa", ofstream::out | ofstream::trunc);
@@ -25651,7 +25065,7 @@ void get_haplotype_path_10_29(uint32_t **connection_count_forward, uint32_t **co
         if (contig_names.empty())
             continue;
 
-
+        // 拼接 contig 名称，中间用下划线
         std::string fasta_name;
         for (size_t j = 0; j < contig_names.size(); j++)
         {
@@ -25660,7 +25074,7 @@ void get_haplotype_path_10_29(uint32_t **connection_count_forward, uint32_t **co
                 fasta_name += "_";
         }
 
-
+        // 写入 FASTA 格式
         outFA << ">" << fasta_name << std::endl;
         outFA << step11.haplo_sequences[i] << std::endl;
     }
@@ -25670,15 +25084,15 @@ void get_haplotype_path_10_29(uint32_t **connection_count_forward, uint32_t **co
     // exit(1);
     // assemble_haplo_sequence
     //...........................................................................................................................................................
-    uint32_t len11 = step11.len;
+    uint32_t len11 = step11.len; // contig 数量
     map<string, string> contig_hap1s11, contig_hap2s11;
     map<string, uint32_t> contig_lengths, contig_id11;
     map<uint32_t, string> id_contig;
 
-
+    // 1. 初始化 contig_hap 和长度信息
     for (uint32_t i = 0; i < step11.len; i++)
     {
-
+        // 从 step11.current_contig_names[i] 获取 contig 名
         string contig_name;
         if (!step11.current_contig_names[i].empty())
         {
@@ -25689,8 +25103,8 @@ void get_haplotype_path_10_29(uint32_t **connection_count_forward, uint32_t **co
             contig_name = "ctg" + to_string(i);
         }
 
-
-        string dummy_seq = string(100, 'A');
+        // haplo_sequences 暂用占位符
+        string dummy_seq = string(100, 'A'); // 100个A作为占位
         contig_hap1s11[contig_name] = dummy_seq;
         contig_hap2s11[contig_name] = dummy_seq;
         contig_lengths[contig_name] = step11.path_len[i];
@@ -25698,18 +25112,18 @@ void get_haplotype_path_10_29(uint32_t **connection_count_forward, uint32_t **co
         id_contig[i] = contig_name;
     }
 
-
+    // 2. 初始化 connect_num，只需要 len*2 表示正反方向
     // uint32_t N = len11 * 2;
     uint32_t **connect_num11 = step11.counting_result;
 
-
+    // 3. 输出 scaffold_connection.txt
     ofstream outFileScaffold11;
     outFileScaffold11.open(string(output_directory) + "/scaffold_connection.txt", ofstream::out | ofstream::trunc);
     for (uint32_t i = 0; i < N; i++)
     {
         for (uint32_t j = 0; j < N; j++)
         {
-            if ((i & 1) == 0)
+            if ((i & 1) == 0) // 只保留正向主对角
             {
                 connect_num11[i][j] += connect_num11[i ^ 1][j ^ 1];
             }
@@ -25728,7 +25142,7 @@ void get_haplotype_path_10_29(uint32_t **connection_count_forward, uint32_t **co
     }
     outFileScaffold11.close();
 
-
+    // 4. 输出 scaffold_id_name.txt
     ofstream outFileScaffoldMap11;
     outFileScaffoldMap11.open(string(output_directory) + "/scaffold_id_name.txt", ofstream::out | ofstream::trunc);
     for (uint32_t i = 0; i < step11.len; i++)
@@ -25737,7 +25151,7 @@ void get_haplotype_path_10_29(uint32_t **connection_count_forward, uint32_t **co
     }
     outFileScaffoldMap11.close();
 
-
+    // 5. 输出 scaffold_connection_simp.txt
     ofstream outFileScaffoldSimple11;
     outFileScaffoldSimple11.open(string(output_directory) + "/scaffold_connection_simp.txt", ofstream::out | ofstream::trunc);
     for (uint32_t i = 0; i < len11; i++)
@@ -25760,7 +25174,7 @@ void get_haplotype_path_10_29(uint32_t **connection_count_forward, uint32_t **co
     }
     outFileScaffoldSimple11.close();
 
-
+    // 6. 更新 len
     uint32_t long_threshold = 5000000;
     len11 = contig_lengths.size();
 
@@ -27265,11 +26679,11 @@ void get_haplotype_path_10_29(uint32_t **connection_count_forward, uint32_t **co
     //             }
     //         }
 
-
+    //         // 获取 begin node 和 end node 的名字
     //         string beg_node_name = graph->seq[bubble->begNode / 2].name;
     //         string end_node_name = graph->seq[bubble->endNode / 2].name;
 
-
+    //         // 判断是 pure 还是 complex 并输出信息
     //         if (nodes.size() > 50)
     //         {
     //             complex_bubbles.push_back(bubble);
@@ -27287,7 +26701,7 @@ void get_haplotype_path_10_29(uint32_t **connection_count_forward, uint32_t **co
     //                  << ", Type: pure" << endl;
     //         }
 
-
+    //         // 输出包含的 node 节点
     //         if (nodes.size() >= 1)
     //         {
     //             cout << "Contained Nodes: ";
@@ -27488,13 +26902,13 @@ void get_haplotype_path_10_29(uint32_t **connection_count_forward, uint32_t **co
     // //............................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................
     // kt_for(n_threads, worker_for_single_step, &step, step.beg_node->size());
 
-
+    // // TODO: 整个三个部分：hap chains + bubble chains + contig paths
     // //............................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................
-
-
+    // //.........................................将结构转为bubble_chain_results........................................................
+    // //  创建 bubble_chain_result 的二维结构，维度与 bubble_chains 一致
     // std::vector<std::vector<bubble_chain_result>> bubble_chain_results1(bubble_chains.size());
     // cout << "Start to convert bubble_chains to bubble_chain_results" << endl;
-
+    // // 2. 构造 beg_node 到 component index 的映射
     // unordered_map<uint32_t, size_t> beg_node_to_component1;
     // for (size_t comp_idx = 0; comp_idx < bubble_chains.size(); ++comp_idx)
     // {
@@ -27504,7 +26918,7 @@ void get_haplotype_path_10_29(uint32_t **connection_count_forward, uint32_t **co
     //     }
     // }
 
-
+    // // 3. 遍历 step.beg_node，构造 bubble_chain_result 插入对应 component
     // for (size_t i = 0; i < step.beg_node->size(); ++i)
     // {
     //     uint32_t beg = (*step.beg_node)[i];
@@ -27524,14 +26938,14 @@ void get_haplotype_path_10_29(uint32_t **connection_count_forward, uint32_t **co
     //     bcr.begin = beg;
     //     bcr.end = end;
 
-
+    //     // 根据已有数据填充 hap_path 和 hap_seq
     //     bcr.hap_path1 = step.haplo_pathes[i * 2];
     //     bcr.hap_path2 = step.haplo_pathes[i * 2 + 1];
     //     bcr.hap1_seq = step.haplo_sequences[i * 2];
     //     bcr.hap2_seq = step.haplo_sequences[i * 2 + 1];
 
-
-
+    //     // 这里假设 hap_path 的第一个和最后一个元素就是 hap_begin / hap_end
+    //     // 如果 hap_path 为空，需要安全检查
     //     if (!bcr.hap_path1.empty())
     //     {
     //         bcr.hap1_begin = beg;
@@ -27539,7 +26953,7 @@ void get_haplotype_path_10_29(uint32_t **connection_count_forward, uint32_t **co
     //     }
     //     else
     //     {
-
+    //         bcr.hap1_begin = bcr.hap1_end = UINT32_MAX; // 或者用 0
     //     }
     //     if (!bcr.hap_path2.empty())
     //     {
@@ -27551,34 +26965,34 @@ void get_haplotype_path_10_29(uint32_t **connection_count_forward, uint32_t **co
     //         bcr.hap2_begin = bcr.hap2_end = UINT32_MAX;
     //     }
 
-
+    //     // 生成 nodes 集合（两个 hap_path 所有节点合并）
     //     bcr.nodes.insert(bcr.hap_path1.begin(), bcr.hap_path1.end());
     //     bcr.nodes.insert(bcr.hap_path2.begin(), bcr.hap_path2.end());
 
+    //     // 如果你有逻辑区分 is_bubble / is_hap_only，这里可以直接判断赋值
+    //     bcr.is_bubble = true;    // 占位
+    //     bcr.is_hap_only = false; // 占位
 
-
-
-
-
+    //     // 其它布尔标志位可以初始化
     //     bcr.hap_path1_arrived = false;
     //     bcr.hap_path2_arrived = false;
 
     //     bubble_chain_results1[comp_idx].push_back(std::move(bcr));
     // }
 
-
+    // // Step1:: 拼接 contig paths
     // //  std::vector<std::vector<std::string>> group_contigs(components1.size());
     // //  contig_for_phasing(bubble_chain_results1, graph, connections_count, components1, output_directory, contig_paths, group_contigs);
+    // // Step2:: 替换contig paths 中的 bubble chains
 
-
-
+    // // Step3:: hap chains 内部拼接
 
     // // vector<vector<hap_chain_result_t>>hap_results =  hap_results_debug;
     // // vector<vector<uint32_t>>unvisited_nodes = unvisited_nodes_global;
     // // match_hap_results_with_contigs(hap_results, unvisited_nodes, contig_paths, graph);
     // match_and_extend_contigs(contig_paths, step, graph);
 
-
+    // cout << "完成 " << endl;
     // //............................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................
 
     // ofstream outFile1;
@@ -27644,12 +27058,12 @@ void get_haplotype_path_10_29(uint32_t **connection_count_forward, uint32_t **co
 
     // //     int current_index = 0;
     // //      for (const auto& [contig_name, contig_path] : contig_paths) {
-
+    // //         // 为每个haplotype创建两个副本（模拟两个单倍型）
 
     // //             std::vector<uint32_t> nodes;
     // //             map<uint32_t, uint32_t> positions;
 
-
+    // //             // 遍历contig path中的每个utg
     // //             for (size_t i = 0; i < contig_path.utg_path.size(); i++) {
 
     // //                 std::string num_str = contig_path.utg_path[i].substr(3, 6);
@@ -27665,8 +27079,8 @@ void get_haplotype_path_10_29(uint32_t **connection_count_forward, uint32_t **co
     // //     }
 
     // //     kt_for(n_threads, counter_worker_single_step , &contig_step, contig_paths.size()*2);
-
-
+    // //     // contig_step.current_nodes_haplo = //每个contig_paths 中path中utg 的name 然后取出数字-1.
+    // //     // contig_step.node_positions =//每个contig_paths 中path中utg 所在的位置
     // //     for(int i = 0; i < contig_paths.size()*4; i++){
     // //         double ratio_i = 1;
     // //         for(int j = 0; j < len*4; j++){
@@ -27676,7 +27090,7 @@ void get_haplotype_path_10_29(uint32_t **connection_count_forward, uint32_t **co
     // //     }
     // //     std::vector<std::string> contig_names;
     // // for (const auto& pair : contig_paths) {
-
+    // //     contig_names.push_back(pair.first); // 存储contig名称
     // // }
     // //     ofstream outFileScaffold1;
     // //     outFileScaffold1.open(string(output_directory)+string("/scaffold_connection_contig.txt"), ofstream::out | ofstream::trunc);
@@ -27709,9 +27123,9 @@ void get_haplotype_path_10_29(uint32_t **connection_count_forward, uint32_t **co
     // // } count_step;
 
     // count_step contig_step;
-
-
-
+    // contig_step.len = contig_paths.size();     // contig 数量
+    // contig_step.counting_result = connect_num; // contig_paths.size()* 2,因为是正反方向的统计
+    // // TODO:如何找出同一个bubble所属的contig,从而不会将他们进行拼接。
 
     // //............................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................
     // count_step cstep;

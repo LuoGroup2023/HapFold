@@ -50,10 +50,6 @@ typedef struct {
     int thread_num;
     int k_mer_length;
     int hic_mer_length;
-    int hybrid_hic_mapping;
-    int hybrid_min_unique_anchors;
-    double hybrid_unique_weight;
-    double hybrid_unique_bonus_cap;
     int ul_mer_length;
     int trans_mer_length;
     int bub_mer_length;

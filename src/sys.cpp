@@ -31,7 +31,7 @@ double yak_cputime(void)
 
 //     while (std::getline(stat_stream, line)) {
 //         if (line.compare(0, 6, "VmRSS:") == 0) {
-
+//             // 找到 VmRSS 行，格式通常为: "VmRSS:     1234 KB"
 //             size_t first_digit = line.find_first_of("0123456789");
 //             size_t last_digit = line.find_last_of("0123456789");
 //             rss = std::stoul(line.substr(first_digit, last_digit - first_digit + 1));
@@ -40,7 +40,7 @@ double yak_cputime(void)
 //     }
 //     return rss;
 // #else
-
+//     return 0; // 不支持的平台
 // #endif
 // }
 

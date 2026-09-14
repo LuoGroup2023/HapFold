@@ -16,10 +16,6 @@
 #include "kdq.h"
 #include "horder.h"
 #include "gfa_ut.h"
-#include <map>
-#include <string>
-#include <utility>
-#include <algorithm>
 KSEQ_INIT(gzFile, gzread)
 KDQ_INIT(uint64_t)
 
@@ -245,8 +241,7 @@ typedef struct { // global data structure for kt_pipeline()
 
 typedef struct {
 	uint64_t ref;
-    uint64_t off_cnt;
-    uint32_t unique_support;
+    uint64_t off_cnt; 
 } s_hit;
 
 typedef struct {
@@ -1072,7 +1067,6 @@ uint64_t *pos_list, uint64_t cnt, uint64_t* c_sfx)
     {
         ///get
         kv_pushp(s_hit, buf->a, &p);
-        p->unique_support = 1;
         rev = (pos_list[j]>>63) != self_rev;
         ref_p = pos_list[j] & idx->pos_mode;
         uID = (pos_list[j] << 1) >> (64 - idx->uID_bits);
@@ -1150,7 +1144,7 @@ inline void compress_mapped_pos_advance(const ha_ug_index* idx, kvec_vote* buf, 
     uint64_t max_beg = 0, max_end = 0, max_i, max_occ, cur_beg, cur_end, ovlp;
     uint64_t second_i = (uint64_t)-1, second_occ;
     uint64_t max_eLen, sec_eLen;
-    double max_eRate, sec_eRate, eRate, max_score = -1.0, sec_score = -1.0;
+    double max_eRate, sec_eRate, eRate;
     p = buf->a.a + buf_iter;
     cnt = buf->a.n - buf_iter;
     if(cnt > 1) radix_sort_hc_s_hit_off_cnt(p, p + cnt); ///buf save all hits, here sort by offset in reads 
@@ -1162,24 +1156,9 @@ inline void compress_mapped_pos_advance(const ha_ug_index* idx, kvec_vote* buf, 
             ///occ = j - i;
             interpret_pos((ha_ug_index*)idx, &p[i], &rev, &uID, &ref_p, &self_p, &eLen, &tLen);
             eRate = (double)(eLen)/(double)(tLen);
-            if (asm_opt.hybrid_hic_mapping &&
-                p[i].unique_support < (uint32_t)asm_opt.hybrid_min_unique_anchors)
-            {
-                i = j;
-                continue;
-            }
-            double score = (double)eLen;
-            if (asm_opt.hybrid_hic_mapping)
-            {
-                const double raw_bonus = p[i].unique_support * idx->k *
-                                         asm_opt.hybrid_unique_weight;
-                const double capped_bonus = eLen * asm_opt.hybrid_unique_bonus_cap;
-                score += MIN(raw_bonus, capped_bonus);
-            }
-            if(score > max_score || (score == max_score && eRate > max_eRate))
+            if(is_update_hit(max_eLen, max_eRate, eLen, eRate))
             {
                 max_eLen = eLen; max_eRate = eRate;
-                max_score = score;
                 max_end = self_p; max_beg = self_p + 1 - tLen;
                 max_i = i; max_occ = j - i;
             }
@@ -1187,12 +1166,6 @@ inline void compress_mapped_pos_advance(const ha_ug_index* idx, kvec_vote* buf, 
             // i, j, uID, ref_p, self_p, eLen, tLen, max_i);
             i = j;///must
         }
-    }
-
-    if (max_i == (uint64_t)-1)
-    {
-        buf->a.n = buf_iter;
-        return;
     }
 
 
@@ -1205,12 +1178,6 @@ inline void compress_mapped_pos_advance(const ha_ug_index* idx, kvec_vote* buf, 
             {
                 interpret_pos((ha_ug_index*)idx, &p[i], &rev, &uID, &ref_p, &self_p, &eLen, &tLen);
                 eRate = (double)(eLen)/(double)(tLen);
-                if (asm_opt.hybrid_hic_mapping &&
-                    p[i].unique_support < (uint32_t)asm_opt.hybrid_min_unique_anchors)
-                {
-                    i = j;
-                    continue;
-                }
                 cur_end = self_p;
                 cur_beg = self_p + 1 - tLen;
                 // fprintf(stderr, "\n----[%lu, %lu] uID: %lu, ref_p: %lu, self_p: %lu, eLen: %lu, tLen: %lu, max_i: %lu\n", 
@@ -1222,19 +1189,17 @@ inline void compress_mapped_pos_advance(const ha_ug_index* idx, kvec_vote* buf, 
                 {
                     ovlp = MIN(cur_end, max_end) - MAX(cur_beg, max_beg) + 1;
                     /*******************************for debug************************************/
-                    const uint64_t max_span = max_end + 1 - max_beg;
-                    const uint64_t cur_span = cur_end + 1 - cur_beg;
-                    if(ovlp == MIN(max_span, cur_span))///for non-unique k-mer
+                    if(ovlp == MIN(max_end+1-max_end, tLen))///for non-unique k-mer
                     {
                         i = j;///must
                         continue;///fully contain
                     }
-                    if(ovlp > (MIN(max_span, cur_span)*0.8) && eLen > (max_eLen*0.8))///best is not unique
+                    if(ovlp > ((max_end+1-max_end)*0.8) && eLen > (max_eLen*0.8))///best is not unique
                     {
                         buf->a.n = buf_iter;
                         return;
                     }
-                    if(ovlp > (MIN(max_span, cur_span)*0.15) + 1)
+                    if(ovlp > ((max_end+1-max_end)*0.15) + 1)
                     {
                         i = j;///must
                         continue;///fully contain
@@ -1253,18 +1218,9 @@ inline void compress_mapped_pos_advance(const ha_ug_index* idx, kvec_vote* buf, 
                     /*******************************for debug************************************/
                 }
 
-                double score = (double)eLen;
-                if (asm_opt.hybrid_hic_mapping)
-                {
-                    const double raw_bonus = p[i].unique_support * idx->k *
-                                             asm_opt.hybrid_unique_weight;
-                    const double capped_bonus = eLen * asm_opt.hybrid_unique_bonus_cap;
-                    score += MIN(raw_bonus, capped_bonus);
-                }
-                if(score > sec_score || (score == sec_score && eRate > sec_eRate))
+                if(is_update_hit(sec_eLen, sec_eRate, eLen, eRate))
                 {
                     sec_eLen = eLen; sec_eRate = eRate;
-                    sec_score = score;
                     second_i = i; second_occ = j - i;
                 }
             }
@@ -1383,7 +1339,6 @@ void get_alignment(char *r, uint64_t len, uint64_t k_mer, kvec_vote* buf, const 
         ovlp = collect_votes(buf->a.a + index_beg, i - index_beg);
         ///fprintf(stderr, "i-1: %lu, self_p: %u\n", i-1, (uint32_t)buf->a.a[i - 1].off_cnt);
         buf->a.a[m] = buf->a.a[i - 1];
-        buf->a.a[m].unique_support = (uint32_t)(i - index_beg);
         buf->a.a[m].off_cnt = (buf->a.a[m].off_cnt << 32)>>32;
         buf->a.a[m].off_cnt += ((uint64_t)ovlp<<32);
         ///fprintf(stderr, "m: %lu, self_p: %u\n", m, (uint32_t)buf->a.a[m].off_cnt);
@@ -1568,7 +1523,6 @@ void get_alignment_debug(char *r, uint64_t len, uint64_t k_mer, kvec_vote* buf, 
                 for (j = 0; j < cnt; j++)
                 {
                     kv_pushp(s_hit, buf->a, &p);
-                    p->unique_support = 1;
                     rev = (pos_list[j]>>63) != skip;
                     self_p = i;
                     ref_p = pos_list[j] & idx->pos_mode;
@@ -5291,63 +5245,6 @@ void write_hc_hits(kvec_pe_hit* hits, ma_ug_t* ug, const char *fn)
 
     fclose(fp);
     free(buf);
-}
-
-/* Export the already-computed hifiasm Hi-C/Pore-C mappings in HapFold's
- * sparse contact schema.  This removes the former second mapping pass.  The
- * original *.hic.lk.bin remains the lossless per-read/position bundle for
- * future endpoint-density scaffolding. */
-static void write_hapfold_hybrid_mapping(const kvec_pe_hit *hits,
-                                         const ha_ug_index *idx,
-                                         const char *fn)
-{
-    if (!asm_opt.hybrid_hic_mapping) return;
-    std::map<uint64_t, std::pair<uint64_t, uint64_t> > counts;
-    for (size_t i = 0; i < hits->a.n; ++i)
-    {
-        const pe_hit &hit = hits->a.a[i];
-        uint32_t a = (uint32_t)((hit.s << 1) >> (64 - idx->uID_bits));
-        uint32_t b = (uint32_t)((hit.e << 1) >> (64 - idx->uID_bits));
-        if (a == b) continue;
-        const bool same_orientation = (hit.s >> 63) == (hit.e >> 63);
-        if (a < b) std::swap(a, b);
-        const uint64_t key = ((uint64_t)a << 32) | b;
-        if (same_orientation) ++counts[key].first;
-        else ++counts[key].second;
-    }
-
-    std::string mapping_path = std::string(fn) + ".hic.hapfold.mapping.tsv";
-    FILE *out = fopen(mapping_path.c_str(), "w");
-    if (!out)
-    {
-        fprintf(stderr, "[E::hybrid_mapping] cannot write %s\n", mapping_path.c_str());
-        return;
-    }
-    fprintf(out, "#hapfold_mapping_v2\tunitig_i\tunitig_j\tforward\tbackward\n");
-    for (const auto &entry : counts)
-        fprintf(out, "%u\t%u\t%lu\t%lu\n",
-                (uint32_t)(entry.first >> 32), (uint32_t)entry.first,
-                entry.second.first, entry.second.second);
-    fclose(out);
-
-    std::string meta_path = std::string(fn) + ".hic.hapfold.mapping.meta.json";
-    out = fopen(meta_path.c_str(), "w");
-    if (out)
-    {
-        fprintf(out,
-                "{\n  \"schema\": \"hapfold_mapping_v2\",\n"
-                "  \"source\": \"hifiasm_hybrid_single_pass\",\n"
-                "  \"pair_count\": %lu,\n  \"contact_pair_count\": %lu,\n"
-                "  \"position_bundle\": \"%s.hic.lk.bin\",\n"
-                "  \"unique_weight\": %.6g,\n  \"unique_bonus_cap\": %.6g,\n"
-                "  \"min_unique_anchors\": %d\n}\n",
-                (uint64_t)hits->a.n, (uint64_t)counts.size(), fn,
-                asm_opt.hybrid_unique_weight, asm_opt.hybrid_unique_bonus_cap,
-                asm_opt.hybrid_min_unique_anchors);
-        fclose(out);
-    }
-    fprintf(stderr, "[M::hybrid_mapping] wrote %s from the hifiasm mapping pass\n",
-            mapping_path.c_str());
 }
 
 void write_hc_hits_v14(kvec_pe_hit_hap* i_hits, const char *fn)
@@ -17135,7 +17032,6 @@ int hic_short_align(const enzyme *fn1, const enzyme *fn2, ha_ug_index* idx, ug_o
         write_hc_hits(&sl.hits, idx->ug, asm_opt.output_file_name);
     }
     sl.hits.uID_bits = idx->uID_bits; sl.hits.pos_mode = idx->pos_mode;
-    write_hapfold_hybrid_mapping(&sl.hits, idx, asm_opt.output_file_name);
 
     /***debug***/
     if(sl.hits.idx.n == 0) idx_hc_links(&(sl.hits), idx, NULL);
@@ -17363,7 +17259,6 @@ spg_t *hic_short_pre_align(const enzyme *fn1, const enzyme *fn2, ha_ug_index* id
         fprintf(stderr, "sb1sb\n");
     }
     sl.hits.uID_bits = idx->uID_bits; sl.hits.pos_mode = idx->pos_mode;
-    write_hapfold_hybrid_mapping(&sl.hits, idx, asm_opt.output_file_name);
     kv_u_trans_t k_trans; 
     kv_init(k_trans); kv_init(k_trans.idx);
     bubble_type bub; 
@@ -17777,7 +17672,6 @@ int hic_short_align_mmhap(const enzyme *fn1, const enzyme *fn2, ha_ug_index* idx
         write_hc_hits(&sl.hits, idx->ug, asm_opt.output_file_name);
     }
     sl.hits.uID_bits = idx->uID_bits; sl.hits.pos_mode = idx->pos_mode;
-    write_hapfold_hybrid_mapping(&sl.hits, idx, asm_opt.output_file_name);
 
     if(sl.hits.idx.n == 0) idx_hc_links(&(sl.hits), idx, NULL);
 

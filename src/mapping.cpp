@@ -38,7 +38,7 @@ typedef struct
 	uint64_t *a;
 	uint64_t *r;
 	bool *f;
-	uint32_t *pos;
+	uint32_t *pos; // 新增：记录kmer首个碱基在序列中的位置
 } ch_buf_t;
 
 void printBits(size_t const size, void const *const ptr)
@@ -58,17 +58,17 @@ void printBits(size_t const size, void const *const ptr)
 	puts("");
 }
 
+// 一个桶 b 其实是一个 动态数组，数组大小 = b->m，当前已用 = b->n。
 
+// 桶里每条记录存了一行信息：
 
+// a：k-mer 的哈希值（uint64_t）
 
+// f：这个 k-mer 是 forward 还是 reverse（布尔）
 
+// pos：k-mer 在原序列中的位置（uint32_t）
 
-
-
-
-
-
-
+// r：这个 k-mer 属于哪条 read（seq_id）
 static inline void ch_insert_buf(ch_buf_t *buf, int p, uint64_t y, uint64_t seq_id, bool f, uint32_t kmer_pos)
 {
 	int pre = y & ((1 << p) - 1);
@@ -79,12 +79,12 @@ static inline void ch_insert_buf(ch_buf_t *buf, int p, uint64_t y, uint64_t seq_
 		REALLOC(b->a, b->m);
 		REALLOC(b->r, b->m);
 		REALLOC(b->f, b->m);
-		REALLOC(b->pos, b->m);
+		REALLOC(b->pos, b->m); // 新增
 	}
 	b->a[b->n] = y;
 	b->f[b->n] = f;
 
-	b->pos[b->n] = kmer_pos;
+	b->pos[b->n] = kmer_pos; // 新增
 	b->r[b->n++] = seq_id;
 }
 
@@ -104,7 +104,7 @@ static void count_seq_buf(ch_buf_t *buf, int k, int p, int len, const char *seq,
 			{ // we find a k-mer
 				f = x[0] < x[1];
 				uint64_t y = f ? x[0] : x[1];
-				ch_insert_buf(buf, p, yak_hash64(y, mask), seq_id, f, i - k + 1);
+				ch_insert_buf(buf, p, yak_hash64(y, mask), seq_id, f, i - k + 1); // 新增参数
 			}
 		}
 		else
@@ -128,7 +128,7 @@ static void count_seq_buf_long(ch_buf_t *buf, int k, int p, int len, const char 
 			x[3] = x[3] >> 1 | (uint64_t)(1 - (c >> 1)) << shift;
 			uint64_t y = f ? x[0] : x[1];
 			if (++l >= k)
-				ch_insert_buf(buf, p, yak_hash64(y, mask), seq_id, f, i - k + 1);
+				ch_insert_buf(buf, p, yak_hash64(y, mask), seq_id, f, i - k + 1); // 新增参数
 		}
 		else
 			l = 0, x[0] = x[1] = x[2] = x[3] = 0; // if there is an "N", restart
@@ -141,7 +141,7 @@ typedef struct
 	int create_new;
 	kseq_t *ks;
 	yak_ch_t *h;
-	yak_ch_t *h_pos;
+	yak_ch_t *h_pos; // 新增：专门存pos的哈希表
 	uint64_t global_counter;
 	int seg_n;
 	std::vector<char *> *names;
@@ -163,13 +163,13 @@ static void worker_for(void *data, long i, int tid) // callback for kt_for()
 {
 	stepdat_t *s = (stepdat_t *)data;
 	yak_ch_t *h = s->p->h;
-	yak_ch_t *h_pos = s->p->h_pos;
+	yak_ch_t *h_pos = s->p->h_pos; // 新增
 	ch_buf_t *b = &s->buf[i];
 	// b->n_ins += yak_ch_insert_list_kmer_record_mapping(h, s->p->create_new, b->n, b->a, b->f, NULL, b->r, i, NULL);
 	//    b->n_ins += yak_ch_insert_list_kmer_record_mapping(
 	//        h, s->p->create_new, b->n, b->a, b->f, b->pos, b->r, i, NULL
 	//    );
-
+	//    插入pos表
 	//    cout<<"in yak_ch_insert_list_kmer_pos"<<endl;
 	//    b->n_ins += yak_ch_insert_list_kmer_pos(h, h_pos, s->p->create_new, b->n, b->a, b->r, b->pos, i);
 	b->n_ins += yak_ch_insert_list_kmer_full(h, h_pos, s->p->create_new, b->n, b->a, b->r, b->pos, b->f, i);
@@ -225,7 +225,7 @@ static void *worker_pipeline(void *data, int step, void *in) // callback for kt_
 			MALLOC(s->buf[i].a, m);
 			MALLOC(s->buf[i].r, m);
 			MALLOC(s->buf[i].f, m);
-			MALLOC(s->buf[i].pos, m);
+			MALLOC(s->buf[i].pos, m); // 新增：分配pos数组
 		}
 		for (i = 0; i < s->n; ++i)
 		{
@@ -252,7 +252,7 @@ static void *worker_pipeline(void *data, int step, void *in) // callback for kt_
 			free(s->buf[i].a);
 			free(s->buf[i].r);
 			free(s->buf[i].f);
-			free(s->buf[i].pos);
+			free(s->buf[i].pos); // 新增：释放pos数组
 		}
 		p->h->tot += n_ins;
 		free(s->buf);
@@ -283,7 +283,7 @@ pldat_t *yak_count_multi_new(const char *fn, const yak_copt_t *opt, yak_ch_t *h0
 		pl->create_new = 1;
 		pl->h = yak_ch_init(opt->k, opt->pre, opt->bf_n_hash, opt->bf_shift);
 	}
-	pl->h_pos = yak_ch_init(opt->k, 30, opt->bf_n_hash, opt->bf_shift);
+	pl->h_pos = yak_ch_init(opt->k, 30, opt->bf_n_hash, opt->bf_shift); // 新增：初始化存pos的哈希表
 	pl->names = new std::vector<char *>();
 
 	kt_pipeline(3, worker_pipeline, pl, 3);
@@ -322,7 +322,7 @@ typedef struct
 	double ratio_thres;
 	bseq_file_t *fp;
 	yak_ch_t *ch;
-	yak_ch_t *h_pos;
+	yak_ch_t *h_pos; // 新增
 	tb_buf_t *buf;
 	std::vector<mapping_res_t> *mappings;
 	int record_num;
@@ -335,8 +335,8 @@ typedef struct
 	bseq_file_t *fp;
 	yak_ch_t *ch1;
 	yak_ch_t *ch2;
-	yak_ch_t *h_pos1;
-	yak_ch_t *h_pos2;
+	yak_ch_t *h_pos1; // 新增
+	yak_ch_t *h_pos2; // 新增
 	tb_buf_t *buf;
 	std::vector<mapping_res_t> *mappings;
 	vector<char *> *contigs_names_hap1;
@@ -367,22 +367,22 @@ typedef struct
 std::string decode_kmer(uint64_t x, int k)
 {
     static const char nt4[] = {'A', 'C', 'G', 'T'};
-    std::string kmer(k, 'A');
+    std::string kmer(k, 'A'); // 初始化为长度为 k 的字符串
     for (int i = 0; i < k; ++i)
     {
-        kmer[k - i - 1] = nt4[x & 0x3];
-        x >>= 2;
+        kmer[k - i - 1] = nt4[x & 0x3]; // 取出最后两位并转换为字符
+        x >>= 2;                        // 向右移动两位，处理下一对二进制位
     }
     return kmer;
 }
 
 struct ReadState
 {
-	int last_q_pos = -1;
-	int last_t_pos = -1;
+	int last_q_pos = -1; // 上一次 query kmer 的 start pos（在 query read 中）
+	int last_t_pos = -1; // 上一次 target pos（在目标 read 中）
 	bool has_last = false;
 	bool last_forward = false;
-	int consist_count = 0;
+	int consist_count = 0; // 本 read 上被判为一致（monotonic + distance ok）的次数
 };
 
 typedef struct
@@ -416,7 +416,7 @@ static void tb_worker(void *_data, long k, int tid)
 	std::map<uint16_t, int> counts;
 	std::map<uint16_t, bool> forward;
 	std::map<uint16_t, uint32_t> positions;
-	yak_ch_t *h_pos = aux->h_pos;
+	yak_ch_t *h_pos = aux->h_pos; // 新增
 	// cout << "Processing read: " << s->name << endl;
 	std::map<int, std::vector<Tread2shapmers>> read2hapmers;
 	if (aux->ch->k < 32)
@@ -494,10 +494,10 @@ static void tb_worker(void *_data, long k, int tid)
 						int target_id = res & YAK_KEY_MASK; // target_id
 
 						Tread2shapmers hap;
-						hap.hapmer =x[0];
-						hap.qposi = l - aux->ch->k;
-						hap.tposi = pos;
-						hap.strand = !(((res & YAK_FORWARD_MASK) != 0) ^ is_forward);
+						hap.hapmer =x[0];					  // query kmer 的序列
+						hap.qposi = l - aux->ch->k;									  // query kmer 在 read 上的位置
+						hap.tposi = pos;											  // target 上的位置（来自 yak_ch_get_pos）
+						hap.strand = !(((res & YAK_FORWARD_MASK) != 0) ^ is_forward); // 相同为0，不同为1
 						read2hapmers[target_id].push_back(hap);
 						// printf("Found hapmer: %s, QPos: %d, TPos: %d, Strand: %d, TargetID: %d\n",
 						// 	   hap.hapmer.c_str(), hap.qposi, hap.tposi, hap.strand, target_id);
@@ -531,11 +531,11 @@ static void tb_worker(void *_data, long k, int tid)
 		{
 			continue;
 		}
-
+		// 计算相同 strand 和不同 strand 的数量
 		int num_same_strand = 0;
 		int num_diff_strand = 0;
 
-
+		// 遍历 shapmers，统计相同和不同 strand 的数量
 		for (const Tread2shapmers &shapmer : shapmers)
 		{
 			if (shapmer.strand == 1)
@@ -547,11 +547,11 @@ static void tb_worker(void *_data, long k, int tid)
 				num_diff_strand++;
 			}
 		}
-
+		// 确定是同向比对，还是反向互补的比对上
 		int strand = (num_same_strand > num_diff_strand) ? 1 : 0;
 
 		std::vector<Tread2shapmers> strand_correct_shapmers;
-
+		// 遍历 shapmers，只挑出正确比对方向的hamper，过滤掉错误噪音
 		for (const Tread2shapmers &shapmer : shapmers)
 		{
 			if (shapmer.strand == strand)
@@ -559,18 +559,18 @@ static void tb_worker(void *_data, long k, int tid)
 				strand_correct_shapmers.push_back(shapmer);
 			}
 		}
-
+		// 统计符合 strand 的 hapmers 数量
 		int num_strand_correct_shapmers = strand_correct_shapmers.size();
 		if (num_strand_correct_shapmers < min_num_shapmers)
 		{
 			continue;
 		}
 		std::vector<Tread2shapmers> posi_correct_shapmers;
-		int n = 3;
-		int shift = 200;
+		int n = 3;		 // 使用 n 个下一个 hapmers 来判断当前 hapmer
+		int shift = 200; // 允许的最大位置偏移
 		if (num_strand_correct_shapmers >= 2 * n)
 		{
-			if (strand == 1)
+			if (strand == 1) // 相同的 strand
 			{
 				for (int i = 0; i <= num_strand_correct_shapmers - n - 1; ++i)
 				{
@@ -595,13 +595,13 @@ static void tb_worker(void *_data, long k, int tid)
 						}
 					}
 
-					if (score > 0)
+					if (score > 0) // 认为这个 hapmer 是可信的，否则移除
 					{
 						posi_correct_shapmers.push_back(strand_correct_shapmers[i]);
 					}
 				}
 
-
+				// 处理最后几个 hapmers（这些 hapmers 没有 n 个后续 hapmers 来判断）
 				for (int i = num_strand_correct_shapmers - n; i < num_strand_correct_shapmers; ++i)
 				{
 					const auto &hapmer_i = strand_correct_shapmers[i];
@@ -632,7 +632,7 @@ static void tb_worker(void *_data, long k, int tid)
 				}
 			}
 			//
-			else
+			else // 不相同的 strand
 			{
 				for (int i = 0; i <= num_strand_correct_shapmers - n - 1; ++i)
 				{
@@ -659,14 +659,14 @@ static void tb_worker(void *_data, long k, int tid)
 						}
 					}
 
-					if (score > 0)
+					if (score > 0) // 认为这个 hapmer 是可信的，否则移除
 					{
 						// cout<<"Accepted hapmer: "<<strand_correct_shapmers[i].hapmer<<", QPos: "<<strand_correct_shapmers[i].qposi<<", TPos: "<<strand_correct_shapmers[i].tposi<<", Strand: "<<strand_correct_shapmers[i].strand<<endl;
 						posi_correct_shapmers.push_back(strand_correct_shapmers[i]);
 					}
 				}
 
-
+				// 处理最后几个 hapmers（这些 hapmers 没有 n 个后续 hapmers 来判断）
 				for (int i = num_strand_correct_shapmers - n; i < num_strand_correct_shapmers; ++i)
 				{
 					const auto &hapmer_i = strand_correct_shapmers[i];
@@ -699,7 +699,7 @@ static void tb_worker(void *_data, long k, int tid)
 		}
 		else if (num_strand_correct_shapmers >= 2 && num_strand_correct_shapmers < 2 * n)
 		{
-			if (strand == 1)
+			if (strand == 1) // 相同的 strand
 			{
 				for (int i = 0; i < num_strand_correct_shapmers; ++i)
 				{
@@ -749,7 +749,7 @@ static void tb_worker(void *_data, long k, int tid)
 					}
 				}
 			}
-			else
+			else // 不同的 strand
 			{
 				for (int i = 0; i < num_strand_correct_shapmers; ++i)
 				{
@@ -808,7 +808,7 @@ static void tb_worker(void *_data, long k, int tid)
 		{
 			continue;
 		}
-		int num_nonovlp_shapmers = 1;
+		int num_nonovlp_shapmers = 1; // 初始值为 1，考虑第一个 hapmer
 		for (size_t i = 0; i < posi_correct_shapmers.size() - 1; ++i)
 		{
 			const Tread2shapmers &hapmer1 = posi_correct_shapmers[i];
@@ -823,7 +823,7 @@ static void tb_worker(void *_data, long k, int tid)
 			// 	 << ", TPos: " << hapmer1.tposi
 			// 	 << ", Strand: " << hapmer1.strand << "\n";
 
-
+			// 检查相邻 hapmers 是否满足距离要求
 			if (std::abs(qposi2 - qposi1) >= aux->ch->k && std::abs(tposi2 - tposi1) >= aux->ch->k)
 			{
 				num_nonovlp_shapmers++;
@@ -921,7 +921,7 @@ void do_mapping2(pldat_t *pl, bseq_file_t *hic_fn1, bseq_file_t *hic_fn2, char *
 	aux.ratio_thres = 0.33;
 	aux.k = pl->h->k;
 	aux.ch = pl->h;
-	aux.h_pos = pl->h_pos;
+	aux.h_pos = pl->h_pos; // 新增
 	aux.record_num = pl->global_counter;
 	cout << "Start mapping, total unitig number: " << aux.record_num << endl;
 	aux.fp = hic_fn1;
@@ -1030,7 +1030,7 @@ void do_mapping2(pldat_t *pl, bseq_file_t *hic_fn1, bseq_file_t *hic_fn2, char *
 
 			if (gid1 != 0 && gid2 != 0 && gid1 != gid2)
 			{
-
+				// 两个都不为0且不相等 → 跳过
 				++skipped_count;
 				continue;
 			}
@@ -1075,7 +1075,6 @@ void do_mapping2(pldat_t *pl, bseq_file_t *hic_fn1, bseq_file_t *hic_fn2, char *
 	if (out_fn)
 	{
 		FILE *fp = fopen(out_fn, "w");
-		fprintf(fp, "#hapfold_mapping_v2\tunitig_i\tunitig_j\tforward\tbackward\n");
 
 		// for(int i = 0; i < pl->global_counter; i++){
 		// 	uint32_t is_forward = forward[i] > backward[i] ? 1 : 0;
@@ -1122,7 +1121,7 @@ void do_mapping(pldat_t *pl, bseq_file_t *hic_fn1, bseq_file_t *hic_fn2, char *o
 	aux.ratio_thres = 0.33;
 	aux.k = pl->h->k;
 	aux.ch = pl->h;
-	aux.h_pos = pl->h_pos;
+	aux.h_pos = pl->h_pos; // 新增
 	aux.record_num = pl->global_counter;
 	cout << "Start mapping, total unitig number: " << aux.record_num << endl;
 	aux.fp = hic_fn1;
@@ -1224,7 +1223,6 @@ void do_mapping(pldat_t *pl, bseq_file_t *hic_fn1, bseq_file_t *hic_fn2, char *o
 	if (out_fn)
 	{
 		FILE *fp = fopen(out_fn, "w");
-		fprintf(fp, "#hapfold_mapping_v2\tunitig_i\tunitig_j\tforward\tbackward\n");
 
 		// for(int i = 0; i < pl->global_counter; i++){
 		// 	uint32_t is_forward = forward[i] > backward[i] ? 1 : 0;
@@ -1271,7 +1269,7 @@ void load_node_type_csv(const char *csv_filename, std::unordered_map<int, int> &
 		if (line.empty())
 			continue;
 
-
+		// 如果CSV第一行是表头，跳过
 		if (first_line && (line.find("node") != std::string::npos || line.find("Node") != std::string::npos))
 		{
 			first_line = false;
@@ -1400,7 +1398,7 @@ static void hifi_worker(void *_data, long k, int tid)
 	std::map<int, std::vector<Tread2shapmers>> read2hapmers_hap1;
 	std::map<int, std::vector<Tread2shapmers>> read2hapmers_hap2;
 	std::unordered_map<uint64_t, int> hap_length_map;
-
+	// 。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。
 	bool hap_flag = false;
 	if (aux->ch1->k < 32)
 	{
@@ -1496,7 +1494,7 @@ static void hifi_worker(void *_data, long k, int tid)
 							hap.hapmer = x[0];
 
 							hap.tposi = pos;
-							hap.strand = !(((res_h1 & YAK_FORWARD_MASK) != 0) ^ is_forward);
+							hap.strand = !(((res_h1 & YAK_FORWARD_MASK) != 0) ^ is_forward); // 相同为0，不同为1
 
 							hap.qposi = l - aux->ch1->k;
 
@@ -1516,7 +1514,7 @@ static void hifi_worker(void *_data, long k, int tid)
 							hap.hapmer = x[0];
 
 							hap.tposi = pos;
-							hap.strand = !(((res_h2 & YAK_FORWARD_MASK) != 0) ^ is_forward);
+							hap.strand = !(((res_h2 & YAK_FORWARD_MASK) != 0) ^ is_forward); // 相同为0，不同为1
 
 							hap.qposi = l - aux->ch2->k;
 
@@ -1536,9 +1534,9 @@ static void hifi_worker(void *_data, long k, int tid)
 		return;
 	}
 
+	// 替换原有的判断块
 
-
-
+	// 找出 map 中 value.size() 的最大值（如果 map 为空，返回 0）
 	auto max_vec_size = [](const auto &m) -> size_t
 	{
 		size_t mx = 0;
@@ -1566,7 +1564,7 @@ static void hifi_worker(void *_data, long k, int tid)
 	}
 	else
 	{
-
+		// tie-break: 可以按你希望的策略决定，这里示例保留原逻辑改成 hap1 优先
 		read2hapmers = read2hapmers_hap1;
 		hap_length_map = g_read_length_map_hap1;
 		hap_flag = true;
@@ -1617,11 +1615,11 @@ static void hifi_worker(void *_data, long k, int tid)
 		{
 			continue;
 		}
-
+		// 计算相同 strand 和不同 strand 的数量
 		int num_same_strand = 0;
 		int num_diff_strand = 0;
 
-
+		// 遍历 shapmers，统计相同和不同 strand 的数量
 		for (const Tread2shapmers &shapmer : shapmers)
 		{
 			if (shapmer.strand == 1)
@@ -1633,11 +1631,11 @@ static void hifi_worker(void *_data, long k, int tid)
 				num_diff_strand++;
 			}
 		}
-
+		// 确定是同向比对，还是反向互补的比对上
 		int strand = (num_same_strand > num_diff_strand) ? 1 : 0;
 
 		std::vector<Tread2shapmers> strand_correct_shapmers;
-
+		// 遍历 shapmers，只挑出正确比对方向的hamper，过滤掉错误噪音
 		for (const Tread2shapmers &shapmer : shapmers)
 		{
 			if (shapmer.strand == strand)
@@ -1665,18 +1663,18 @@ static void hifi_worker(void *_data, long k, int tid)
 		// 		  {
 		// 			  return a.qposi < b.qposi;
 		// 		  });
-
+		// 统计符合 strand 的 hapmers 数量
 		int num_strand_correct_shapmers = strand_correct_shapmers.size();
 		if (num_strand_correct_shapmers < min_num_shapmers)
 		{
 			continue;
 		}
 		std::vector<Tread2shapmers> posi_correct_shapmers;
-		int n = 3;
-		int shift = 200;
+		int n = 3;		 // 使用 n 个下一个 hapmers 来判断当前 hapmer
+		int shift = 200; // 允许的最大位置偏移
 		if (num_strand_correct_shapmers >= 2 * n)
 		{
-			if (strand == 1)
+			if (strand == 1) // 相同的 strand
 			{
 				for (int i = 0; i <= num_strand_correct_shapmers - n - 1; ++i)
 				{
@@ -1701,13 +1699,13 @@ static void hifi_worker(void *_data, long k, int tid)
 						}
 					}
 
-					if (score > 0)
+					if (score > 0) // 认为这个 hapmer 是可信的，否则移除
 					{
 						posi_correct_shapmers.push_back(strand_correct_shapmers[i]);
 					}
 				}
 
-
+				// 处理最后几个 hapmers（这些 hapmers 没有 n 个后续 hapmers 来判断）
 				for (int i = num_strand_correct_shapmers - n; i < num_strand_correct_shapmers; ++i)
 				{
 					const auto &hapmer_i = strand_correct_shapmers[i];
@@ -1738,7 +1736,7 @@ static void hifi_worker(void *_data, long k, int tid)
 				}
 			}
 			//
-			else
+			else // 不相同的 strand
 			{
 				for (int i = 0; i <= num_strand_correct_shapmers - n - 1; ++i)
 				{
@@ -1765,14 +1763,14 @@ static void hifi_worker(void *_data, long k, int tid)
 						}
 					}
 
-					if (score > 0)
+					if (score > 0) // 认为这个 hapmer 是可信的，否则移除
 					{
 						// cout<<"Accepted hapmer: "<<strand_correct_shapmers[i].hapmer<<", QPos: "<<strand_correct_shapmers[i].qposi<<", TPos: "<<strand_correct_shapmers[i].tposi<<", Strand: "<<strand_correct_shapmers[i].strand<<endl;
 						posi_correct_shapmers.push_back(strand_correct_shapmers[i]);
 					}
 				}
 
-
+				// 处理最后几个 hapmers（这些 hapmers 没有 n 个后续 hapmers 来判断）
 				for (int i = num_strand_correct_shapmers - n; i < num_strand_correct_shapmers; ++i)
 				{
 					const auto &hapmer_i = strand_correct_shapmers[i];
@@ -1805,7 +1803,7 @@ static void hifi_worker(void *_data, long k, int tid)
 		}
 		else if (num_strand_correct_shapmers >= 2 && num_strand_correct_shapmers < 2 * n)
 		{
-			if (strand == 1)
+			if (strand == 1) // 相同的 strand
 			{
 				for (int i = 0; i < num_strand_correct_shapmers; ++i)
 				{
@@ -1855,7 +1853,7 @@ static void hifi_worker(void *_data, long k, int tid)
 					}
 				}
 			}
-			else
+			else // 不同的 strand
 			{
 				for (int i = 0; i < num_strand_correct_shapmers; ++i)
 				{
@@ -1915,7 +1913,7 @@ static void hifi_worker(void *_data, long k, int tid)
 			continue;
 		}
 
-		int num_nonovlp_shapmers = 1;
+		int num_nonovlp_shapmers = 1; // 初始值为 1，考虑第一个 hapmer
 
 		std::unordered_map<uint64_t, int> count;
 		for (const auto &h : posi_correct_shapmers)
@@ -1927,7 +1925,7 @@ static void hifi_worker(void *_data, long k, int tid)
 		for (const auto &h : posi_correct_shapmers)
 		{
 			if (count[h.hapmer] == 1)
-			{
+			{ // 只保留出现 1 次的
 				filtered.push_back(h);
 			}
 		}
@@ -1961,7 +1959,7 @@ static void hifi_worker(void *_data, long k, int tid)
 			// 	 << ", TPos: " << hapmer1.tposi
 			// 	 << ", Strand: " << hapmer1.strand << "\n";
 
-
+			// 检查相邻 hapmers 是否满足距离要求
 			if (std::abs(qposi2 - qposi1) >= aux->ch1->k && std::abs(tposi2 - tposi1) >= aux->ch1->k)
 			{
 				num_nonovlp_shapmers++;
@@ -1999,7 +1997,7 @@ static void hifi_worker(void *_data, long k, int tid)
 		}
 		// if (min(qend-qstart, tend-tstart)/max(qend-qstart, tend-tstart)) < 0.5:
 		//     continue
-
+		// // // 检查重叠比例
 		double overlap = static_cast<double>(std::min(qend - qstart, tend - tstart)) / std::max(qend - qstart, tend - tstart);
 		// cout << "	overlap ratio: " << overlap << " " << static_cast<double>(std::min(qend - qstart, tend - tstart)) << " " << std::max(qend - qstart, tend - tstart) << endl;
 		if (num_nonovlp_shapmers < 2)
@@ -2045,7 +2043,7 @@ static void hifi_worker(void *_data, long k, int tid)
 					<< num_nonovlp_shapmers << ","
 					<< filtered.size() << ","
 					<< posi_correct_shapmers.size() << "\n";
-
+			// 关闭文件
 			outFile.close();
 		}
 		else
@@ -2069,7 +2067,7 @@ static void hifi_worker(void *_data, long k, int tid)
 					<< num_nonovlp_shapmers << ","
 					<< filtered.size() << ","
 					<< posi_correct_shapmers.size() << "\n";
-
+			// 关闭文件
 			outFile.close();
 		}
 
@@ -2078,7 +2076,7 @@ static void hifi_worker(void *_data, long k, int tid)
 			std::ofstream pafFile;
 			pafFile.open("output_hap1.paf", std::ios::app);
 
-
+			// 提取字段
 			const std::string &target_name = (*aux->contigs_names_hap1)[target_id];
 			int tlen = hap_length_map[target_id];
 			int qlen = s->l_seq;
@@ -2088,7 +2086,7 @@ static void hifi_worker(void *_data, long k, int tid)
 			double identity = 0.85;
 			int n_match = static_cast<int>(aln_block_len * identity);
 
-
+			// MAPQ 计算
 			int mapq = 0;
 			if (num_nonovlp_shapmers < 5)
 				mapq = 0;
@@ -2101,10 +2099,10 @@ static void hifi_worker(void *_data, long k, int tid)
 					mapq = 59;
 			}
 
-
+			// strand 转换为 '+' 或 '-'
 			char strand_symbol = (strand == 1 ? '+' : '-');
 
-
+			// 写入 PAF 行
 			pafFile << s->name << "\t"
 					<< qlen << "\t"
 					<< qstart << "\t"
@@ -2134,7 +2132,7 @@ static void hifi_worker(void *_data, long k, int tid)
 			double identity = 0.85;
 			int n_match = static_cast<int>(aln_block_len * identity);
 
-
+			// MAPQ 计算
 			int mapq = 0;
 			if (num_nonovlp_shapmers < 5)
 				mapq = 0;
@@ -2182,7 +2180,7 @@ static void porec_worker(void *_data, long k, int tid)
 	// Porec
 	std::vector<Hamper_kmer> hamper_kmer;
 	std::map<int, std::vector<Tread2shapmers>> read2hapmers;
-
+	// 。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。。
 
 	if (aux->ch->k < 32)
 	{
@@ -2240,7 +2238,7 @@ static void porec_worker(void *_data, long k, int tid)
 				if (res1 != -1 && res == -1)
 				{
 
-
+					//  检查是否重复
 					auto it = repeated_kmers_map.find(y);
 					if (it != repeated_kmers_map.end())
 					{
@@ -2254,7 +2252,7 @@ static void porec_worker(void *_data, long k, int tid)
 							hap.hapmer = x[0];
 
 							hap.tposi = info.pos;
-							hap.strand = !(info.forward ^ is_forward);
+							hap.strand = !(info.forward ^ is_forward); // 相同为0，不同为1
 
 							hap.qposi = l - aux->ch->k;
 
@@ -2271,7 +2269,7 @@ static void porec_worker(void *_data, long k, int tid)
 					{
 						cout << "y=" << y << " is a new repeated kmer\n";
 					}
-
+					// TODO: 对于第一次出现的 hamper，选择记录
 					uint32_t pos = -1;
 					uint64_t read_id = yak_ch_get_pos_for_repeat(aux->ch, aux->h_pos, y, &pos);
 					if (pos != -1)
@@ -2281,7 +2279,7 @@ static void porec_worker(void *_data, long k, int tid)
 						// hap.hapmer = decode_kmer(x[0], aux->ch->k);
 						hap.hapmer = x[0];
 						hap.tposi = pos;
-						hap.strand = !(((res1 & YAK_FORWARD_MASK) != 0) ^ is_forward);
+						hap.strand = !(((res1 & YAK_FORWARD_MASK) != 0) ^ is_forward); // 相同为0，不同为1
 
 						hap.qposi = l - aux->ch->k;
 
@@ -2305,7 +2303,7 @@ static void porec_worker(void *_data, long k, int tid)
 						//hap.hapmer = decode_kmer(x[0], aux->ch->k);
 						hap.hapmer = x[0];
 						hap.tposi = pos;
-						hap.strand = !(((res & YAK_FORWARD_MASK) != 0) ^ is_forward);
+						hap.strand = !(((res & YAK_FORWARD_MASK) != 0) ^ is_forward); // 相同为0，不同为1
 
 						hap.qposi = l - aux->ch->k;
 
@@ -2345,11 +2343,11 @@ static void porec_worker(void *_data, long k, int tid)
 		{
 			continue;
 		}
-
+		// 计算相同 strand 和不同 strand 的数量
 		int num_same_strand = 0;
 		int num_diff_strand = 0;
 
-
+		// 遍历 shapmers，统计相同和不同 strand 的数量
 		for (const Tread2shapmers &shapmer : shapmers)
 		{
 			if (shapmer.strand == 1)
@@ -2361,11 +2359,11 @@ static void porec_worker(void *_data, long k, int tid)
 				num_diff_strand++;
 			}
 		}
-
+		// 确定是同向比对，还是反向互补的比对上
 		int strand = (num_same_strand > num_diff_strand) ? 1 : 0;
 
 		std::vector<Tread2shapmers> strand_correct_shapmers;
-
+		// 遍历 shapmers，只挑出正确比对方向的hamper，过滤掉错误噪音
 		for (const Tread2shapmers &shapmer : shapmers)
 		{
 			if (shapmer.strand == strand)
@@ -2393,18 +2391,18 @@ static void porec_worker(void *_data, long k, int tid)
 		// 		  {
 		// 			  return a.qposi < b.qposi;
 		// 		  });
-
+		// 统计符合 strand 的 hapmers 数量
 		int num_strand_correct_shapmers = strand_correct_shapmers.size();
 		if (num_strand_correct_shapmers < min_num_shapmers)
 		{
 			continue;
 		}
 		std::vector<Tread2shapmers> posi_correct_shapmers;
-		int n = 3;
-		int shift = 200;
+		int n = 3;		 // 使用 n 个下一个 hapmers 来判断当前 hapmer
+		int shift = 200; // 允许的最大位置偏移
 		if (num_strand_correct_shapmers >= 2 * n)
 		{
-			if (strand == 1)
+			if (strand == 1) // 相同的 strand
 			{
 				for (int i = 0; i <= num_strand_correct_shapmers - n - 1; ++i)
 				{
@@ -2429,13 +2427,13 @@ static void porec_worker(void *_data, long k, int tid)
 						}
 					}
 
-					if (score > 0)
+					if (score > 0) // 认为这个 hapmer 是可信的，否则移除
 					{
 						posi_correct_shapmers.push_back(strand_correct_shapmers[i]);
 					}
 				}
 
-
+				// 处理最后几个 hapmers（这些 hapmers 没有 n 个后续 hapmers 来判断）
 				for (int i = num_strand_correct_shapmers - n; i < num_strand_correct_shapmers; ++i)
 				{
 					const auto &hapmer_i = strand_correct_shapmers[i];
@@ -2466,7 +2464,7 @@ static void porec_worker(void *_data, long k, int tid)
 				}
 			}
 			//
-			else
+			else // 不相同的 strand
 			{
 				for (int i = 0; i <= num_strand_correct_shapmers - n - 1; ++i)
 				{
@@ -2493,14 +2491,14 @@ static void porec_worker(void *_data, long k, int tid)
 						}
 					}
 
-					if (score > 0)
+					if (score > 0) // 认为这个 hapmer 是可信的，否则移除
 					{
 						// cout<<"Accepted hapmer: "<<strand_correct_shapmers[i].hapmer<<", QPos: "<<strand_correct_shapmers[i].qposi<<", TPos: "<<strand_correct_shapmers[i].tposi<<", Strand: "<<strand_correct_shapmers[i].strand<<endl;
 						posi_correct_shapmers.push_back(strand_correct_shapmers[i]);
 					}
 				}
 
-
+				// 处理最后几个 hapmers（这些 hapmers 没有 n 个后续 hapmers 来判断）
 				for (int i = num_strand_correct_shapmers - n; i < num_strand_correct_shapmers; ++i)
 				{
 					const auto &hapmer_i = strand_correct_shapmers[i];
@@ -2533,7 +2531,7 @@ static void porec_worker(void *_data, long k, int tid)
 		}
 		else if (num_strand_correct_shapmers >= 2 && num_strand_correct_shapmers < 2 * n)
 		{
-			if (strand == 1)
+			if (strand == 1) // 相同的 strand
 			{
 				for (int i = 0; i < num_strand_correct_shapmers; ++i)
 				{
@@ -2583,7 +2581,7 @@ static void porec_worker(void *_data, long k, int tid)
 					}
 				}
 			}
-			else
+			else // 不同的 strand
 			{
 				for (int i = 0; i < num_strand_correct_shapmers; ++i)
 				{
@@ -2643,7 +2641,7 @@ static void porec_worker(void *_data, long k, int tid)
 			continue;
 		}
 
-		int num_nonovlp_shapmers = 1;
+		int num_nonovlp_shapmers = 1; // 初始值为 1，考虑第一个 hapmer
 
 		std::unordered_map<uint64_t, int> count;
 		for (const auto &h : posi_correct_shapmers)
@@ -2655,7 +2653,7 @@ static void porec_worker(void *_data, long k, int tid)
 		for (const auto &h : posi_correct_shapmers)
 		{
 			if (count[h.hapmer] == 1)
-			{
+			{ // 只保留出现 1 次的
 				filtered.push_back(h);
 			}
 		}
@@ -2689,7 +2687,7 @@ static void porec_worker(void *_data, long k, int tid)
 			// 	 << ", TPos: " << hapmer1.tposi
 			// 	 << ", Strand: " << hapmer1.strand << "\n";
 
-
+			// 检查相邻 hapmers 是否满足距离要求
 			if (std::abs(qposi2 - qposi1) >= aux->ch->k && std::abs(tposi2 - tposi1) >= aux->ch->k)
 			{
 				num_nonovlp_shapmers++;
@@ -2727,7 +2725,7 @@ static void porec_worker(void *_data, long k, int tid)
 		}
 		// if (min(qend-qstart, tend-tstart)/max(qend-qstart, tend-tstart)) < 0.5:
 		//     continue
-
+		// // // 检查重叠比例
 		double overlap = static_cast<double>(std::min(qend - qstart, tend - tstart)) / std::max(qend - qstart, tend - tstart);
 		// cout << "	overlap ratio: " << overlap << " " << static_cast<double>(std::min(qend - qstart, tend - tstart)) << " " << std::max(qend - qstart, tend - tstart) << endl;
 		if (num_nonovlp_shapmers < 2)
@@ -2758,7 +2756,7 @@ static void porec_worker(void *_data, long k, int tid)
 				<< filtered.size() << ","
 				<< posi_correct_shapmers.size() << "\n";
 
-
+		// 关闭文件
 		outFile.close();
 
 		int tlen = 0;
@@ -2770,7 +2768,7 @@ static void porec_worker(void *_data, long k, int tid)
 		if (!filtered.empty())
 			mapping_quality = std::min(60, int(60.0 * num_nonovlp_shapmers / filtered.size()));
 
-
+		// // ✅ 输出 PAF 格式
 		// std::ofstream outFile_paf("output.paf", std::ios::app);
 		// outFile_paf << s->name << "\t"				// query_name
 		// 		<< s->l_seq << "\t"				// query_length
@@ -2785,9 +2783,9 @@ static void porec_worker(void *_data, long k, int tid)
 		// 		<< filtered.size() << "\t"		// alignment_block_length
 		// 		<< mapping_quality<< "\n";			// mapping_quality
 		// outFile_paf.close();
-
-
-
+		// // （可选）附加标签
+		// outFile << "\tov:i:" << overlap						 // 自定义字段 overlap
+		// 		<< "\tpc:i:" << posi_correct_shapmers.size() // 正确 shapmers 数
 		// 		<< std::endl;
 	}
 
@@ -2945,8 +2943,8 @@ void hifi_do_mapping(pldat_t *pl1, pldat_t *pl2, bseq_file_t *hifi_fn, char *out
 	aux.ch1 = pl1->h;
 	aux.ch2 = pl2->h;
 
-	aux.h_pos1 = pl1->h_pos;
-	aux.h_pos2 = pl2->h_pos;
+	aux.h_pos1 = pl1->h_pos; // 新增
+	aux.h_pos2 = pl2->h_pos; // 新增
 	aux.contigs_names_hap1 = pl1->names;
 	aux.contigs_names_hap2 = pl2->names;
 	aux.record_num = pl1->global_counter > pl2->global_counter ? pl1->global_counter : pl2->global_counter;
@@ -2990,7 +2988,7 @@ void porec_do_mapping(pldat_t *pl, bseq_file_t *hic_fn1, bseq_file_t *hic_fn2, c
 	aux.ratio_thres = 0.33;
 	aux.k = pl->h->k;
 	aux.ch = pl->h;
-	aux.h_pos = pl->h_pos;
+	aux.h_pos = pl->h_pos; // 新增
 	aux.record_num = pl->global_counter;
 	cout << "Start mapping, total unitig number: " << aux.record_num << endl;
 	aux.fp = hic_fn1;
@@ -3038,7 +3036,7 @@ static void worker_for_polishing_target(void *data, long i, int tid) // callback
 {
 	stepdat_t *s = (stepdat_t *)data;
 	yak_ch_t *h = s->p->h;
-	yak_ch_t *h_pos = s->p->h_pos;
+	yak_ch_t *h_pos = s->p->h_pos; // 新增
 	ch_buf_t *b = &s->buf[i];
 	b->n_ins += yak_ch_insert_list_kmer_full_for_polishing_target(h, h_pos, s->p->create_new, b->n, b->a, b->r, b->pos, b->f, i);
 }
@@ -3047,7 +3045,7 @@ static void worker_for_polishing(void *data, long i, int tid) // callback for kt
 {
 	stepdat_t *s = (stepdat_t *)data;
 	yak_ch_t *h = s->p->h;
-	yak_ch_t *h_pos = s->p->h_pos;
+	yak_ch_t *h_pos = s->p->h_pos; // 新增
 	ch_buf_t *b = &s->buf[i];
 	b->n_ins += yak_ch_insert_list_kmer_full_for_polishing(h, h_pos, s->p->create_new, b->n, b->a, b->r, b->pos, b->f, i);
 }
@@ -3057,7 +3055,7 @@ static void count_seq_buf_polishing_target(ch_buf_t *buf, int k, int p, int len,
 	int i, l;
 	bool f;
 	uint64_t x[2], mask = (1ULL << k * 2) - 1, shift = (k - 1) * 2;
-
+	// char *qbuf_f = (char *)malloc(sizeof(char) * k); // 正向 k-mer 的质量值
 
 	for (i = l = 0, x[0] = x[1] = 0; i < len; ++i)
 	{
@@ -3066,7 +3064,7 @@ static void count_seq_buf_polishing_target(ch_buf_t *buf, int k, int p, int len,
 		{												   // not an "N" base
 			x[0] = (x[0] << 2 | c) & mask;				   // forward strand
 			x[1] = x[1] >> 2 | (uint64_t)(3 - c) << shift; // reverse strand
-
+			// 保存质量值到正向和反向缓冲区
 			// qbuf_f[l % k] = qual[i];
 			std::string kmer;
 			if (++l >= k)
@@ -3074,7 +3072,7 @@ static void count_seq_buf_polishing_target(ch_buf_t *buf, int k, int p, int len,
 
 				f = x[0] < x[1];
 				uint64_t y = f ? x[0] : x[1];
-				ch_insert_buf(buf, p, yak_hash64(y, mask), seq_id, f, l - k);
+				ch_insert_buf(buf, p, yak_hash64(y, mask), seq_id, f, l - k); // 新增参数
 																			  // }
 			}
 		}
@@ -3085,7 +3083,7 @@ static void count_seq_buf_polishing_target(ch_buf_t *buf, int k, int p, int len,
 		}
 	}
 
-
+	// free(qbuf_f); // 释放正向质量值缓冲区
 }
 
 static void count_seq_buf_polishing(ch_buf_t *buf, int k, int p, int len, const char *seq, const char *qual, uint64_t seq_id) // insert k-mers in $seq to linear buffer $buf
@@ -3093,7 +3091,7 @@ static void count_seq_buf_polishing(ch_buf_t *buf, int k, int p, int len, const 
 	int i, l;
 	bool f;
 	uint64_t x[2], mask = (1ULL << k * 2) - 1, shift = (k - 1) * 2;
-
+	// char *qbuf_f = (char *)malloc(sizeof(char) * k); // 正向 k-mer 的质量值
 
 	for (i = l = 0, x[0] = x[1] = 0; i < len; ++i)
 	{
@@ -3102,7 +3100,7 @@ static void count_seq_buf_polishing(ch_buf_t *buf, int k, int p, int len, const 
 		{												   // not an "N" base
 			x[0] = (x[0] << 2 | c) & mask;				   // forward strand
 			x[1] = x[1] >> 2 | (uint64_t)(3 - c) << shift; // reverse strand
-
+			// 保存质量值到正向和反向缓冲区
 			// qbuf_f[l % k] = qual[i];
 			std::string kmer;
 			if (++l >= k)
@@ -3120,7 +3118,7 @@ static void count_seq_buf_polishing(ch_buf_t *buf, int k, int p, int len, const 
 					//  }
 					//  uint64_t y2= yak_hash64(y, mask);
 					//  cout<<"y2: "<<y2<<endl;
-					ch_insert_buf(buf, p, yak_hash64(y, mask), seq_id, f, l - k);
+					ch_insert_buf(buf, p, yak_hash64(y, mask), seq_id, f, l - k); // 新增参数
 				}
 			}
 		}
@@ -3131,7 +3129,7 @@ static void count_seq_buf_polishing(ch_buf_t *buf, int k, int p, int len, const 
 		}
 	}
 
-
+	// free(qbuf_f); // 释放正向质量值缓冲区
 }
 
 static void *worker_pipeline_target(void *data, int step, void *in) // callback for kt_pipeline()
@@ -3159,7 +3157,7 @@ static void *worker_pipeline_target(void *data, int step, void *in) // callback 
 			}
 			MALLOC(s->seq[s->n], l);
 			memcpy(s->seq[s->n], p->ks->seq.s, l);
-			s->p->g_read_length_map[p->global_counter - 1] = l;
+			s->p->g_read_length_map[p->global_counter - 1] = l; // 记录读取的序列长度
 			p->names->push_back(strdup(p->ks->name.s));
 			cout << "Reading sequence name: " << p->ks->name.s << ", length: " << l << ",index :" << p->global_counter - 1 << endl;
 			s->len[s->n++] = l;
@@ -3188,7 +3186,7 @@ static void *worker_pipeline_target(void *data, int step, void *in) // callback 
 			MALLOC(s->buf[i].a, m);
 			MALLOC(s->buf[i].r, m);
 			MALLOC(s->buf[i].f, m);
-			MALLOC(s->buf[i].pos, m);
+			MALLOC(s->buf[i].pos, m); // 新增：分配pos数组
 		}
 		// cout<<"Start counting k-mers for polishing target..."<<endl;
 		for (i = 0; i < s->n; ++i)
@@ -3241,14 +3239,14 @@ static void *worker_pipeline_hamper(void *data, int step, void *in) // callback 
 		CALLOC(s, 1);
 		s->p = p;
 		s->global_bias = p->global_counter;
-		s->qual = NULL;
+		s->qual = NULL; // 初始化质量值数组为 NULL
 		while ((ret = kseq_read(p->ks)) >= 0)
 		{
 			p->global_counter++;
 			int l = p->ks->seq.l;
-			int ql = p->ks->qual.l;
+			int ql = p->ks->qual.l; // 质量值的长度
 			if (l < p->opt->k || l != ql)
-				continue;
+				continue; // 确保长度一致
 			if (l < p->opt->k)
 				continue;
 			if (s->n == s->m)
@@ -3256,16 +3254,16 @@ static void *worker_pipeline_hamper(void *data, int step, void *in) // callback 
 				s->m = s->m < 16 ? 16 : s->m + (s->n >> 1);
 				REALLOC(s->len, s->m);
 				REALLOC(s->seq, s->m);
-				REALLOC(s->qual, s->m);
+				REALLOC(s->qual, s->m); // 重新分配质量值数组
 			}
 			MALLOC(s->seq[s->n], l);
-			MALLOC(s->qual[s->n], ql);
+			MALLOC(s->qual[s->n], ql); // 为质量值分配空间
 			memcpy(s->seq[s->n], p->ks->seq.s, l);
-			memcpy(s->qual[s->n], p->ks->qual.s, ql);
+			memcpy(s->qual[s->n], p->ks->qual.s, ql); // 复制质量值
 
 			p->names->push_back(strdup(p->ks->name.s));
 
-
+			// uint64_t read_id = s->global_bias + s->n; // 当前read的全局ID
 			// {
 			// 	g_read_length_map[read_id] = l;
 			// }
@@ -3293,7 +3291,7 @@ static void *worker_pipeline_hamper(void *data, int step, void *in) // callback 
 			MALLOC(s->buf[i].a, m);
 			MALLOC(s->buf[i].r, m);
 			MALLOC(s->buf[i].f, m);
-			MALLOC(s->buf[i].pos, m);
+			MALLOC(s->buf[i].pos, m); // 新增：分配pos数组
 		}
 		for (i = 0; i < s->n; ++i)
 		{
@@ -3302,10 +3300,10 @@ static void *worker_pipeline_hamper(void *data, int step, void *in) // callback 
 			// else
 			// 	count_seq_buf_long(s->buf, p->opt->k, p->opt->pre, s->len[i], s->seq[i], s->global_bias + i);
 			free(s->seq[i]);
-			free(s->qual[i]);
+			free(s->qual[i]); // 释放质量值内存
 		}
 		free(s->seq);
-		free(s->qual);
+		free(s->qual); // 释放质量值数组内存
 		free(s->len);
 		return s;
 	}
@@ -3353,7 +3351,7 @@ pldat_t *hamper_new1(const char *fn, const yak_copt_t *opt, yak_ch_t *h0)
 		pl->h = yak_ch_init(opt->k, opt->pre, opt->bf_n_hash, opt->bf_shift);
 	}
 	pl->names = new std::vector<char *>();
-	pl->h_pos = yak_ch_init(opt->k, 30, opt->bf_n_hash, opt->bf_shift);
+	pl->h_pos = yak_ch_init(opt->k, 30, opt->bf_n_hash, opt->bf_shift); // 新增：初始化存pos的哈希表
 	cout << "Initialize h_pos" << endl;
 	kt_pipeline(3, worker_pipeline_hamper, pl, 3);
 	kseq_destroy(pl->ks);
@@ -3383,7 +3381,7 @@ pldat_t *target_h1(const char *fn, const yak_copt_t *opt, yak_ch_t *h0)
 		pl->h = yak_ch_init(opt->k, opt->pre, opt->bf_n_hash, opt->bf_shift);
 	}
 	pl->names = new std::vector<char *>();
-	pl->h_pos = yak_ch_init(opt->k, 30, opt->bf_n_hash, opt->bf_shift);
+	pl->h_pos = yak_ch_init(opt->k, 30, opt->bf_n_hash, opt->bf_shift); // 新增：初始化存pos的哈希表
 	cout << "Initialize h_pos" << endl;
 	if (!pl->ks)
 	{
@@ -3414,7 +3412,7 @@ pldat_t *target_h1(const char *fn, const yak_copt_t *opt, yak_ch_t *h0)
 // 		pl->create_new = 1;
 // 		pl->h = yak_ch_init(opt->k, opt->pre, opt->bf_n_hash, opt->bf_shift);
 // 	}
-
+// 	pl->h_pos = yak_ch_init(opt->k, 30, opt->bf_n_hash, opt->bf_shift); // 新增：初始化存pos的哈希表
 // 	pl->names = new std::vector<char *>();
 
 // 	kt_pipeline(3, worker_pipeline, pl, 3);
@@ -3425,18 +3423,18 @@ pldat_t *target_h1(const char *fn, const yak_copt_t *opt, yak_ch_t *h0)
 
 int main_polishing(int argc, char *argv[])
 {
-	pldat_t *h1, *h2;
-	int c;
-	char *fn_out = 0;
+	pldat_t *h1, *h2; // 存储Hi-C数据的处理状态及信息
+	int c;			  // 处理命令行参数
+	char *fn_out = 0; // 输出文件名
 
-	yak_copt_t opt;
+	yak_copt_t opt; // 存储命令行选项和参数的信息。这些结构体用于配置Hi-C数据的映射过程。
 	ketopt_t o = KETOPT_INIT;
-	yak_copt_init(&opt);
+	yak_copt_init(&opt); // 初始化结构体opt
 	opt.pre = YAK_COUNTER_BITS;
 	cout << "YAK_COUNTER_BITS: " << YAK_COUNTER_BITS << endl;
 	opt.n_thread = 32;
 	while ((c = ketopt(&o, argc, argv, 1, "k:p:K:t:b:H:o:m:", 0)) >= 0)
-	{
+	{ // 解析后续所有参数
 		if (c == 'k')
 			opt.k = atoi(o.arg);
 		else if (c == 'p')
@@ -3453,7 +3451,7 @@ int main_polishing(int argc, char *argv[])
 			opt.mapping = atoi(o.arg);
 	}
 	if (argc - o.ind < 1)
-	{
+	{ // 设置结构体opt变量，展示
 		// Test
 		fprintf(stderr, "main_polishing_test argc: %d\n", argc);
 		fprintf(stderr, "o.ind: %d\n", o.ind);
@@ -3466,7 +3464,6 @@ int main_polishing(int argc, char *argv[])
 		fprintf(stderr, "  -b INT     set Bloom filter size to 2**INT bits; 0 to disable [%d]\n", opt.bf_shift);
 		fprintf(stderr, "  -t INT     number of worker threads [%d]\n", opt.n_thread);
 		fprintf(stderr, "  -K INT     chunk size [100m]\n");
-		fprintf(stderr, "  -m INT     use haphic\n");
 		fprintf(stderr, "  -o FILE    save mapping relationship to FILE []\n");
 		fprintf(stderr, "Note: -b37 is recommended for human reads\n");
 		return 1;
@@ -3487,13 +3484,13 @@ int main_polishing(int argc, char *argv[])
 	}
 	char *classpro_reads = argv[o.ind + 2]; // classpro reads
 
-
+	// // 读取 GFA 文件
 	// asg_t *graph = gfa_read(gfa_filename);
 	// if (graph == NULL) {
 	//     fprintf(stderr, "ERROR: failed to read GFA file: %s\n", gfa_filename);
 	//     return 1;
 	// }
-
+	// 打开 reads 文件
 	// bseq_file_t *classpro_file = bseq_open(classpro_fn);
 	char *target_reads1 = argv[o.ind];	   // query reads
 	char *target_reads2 = argv[o.ind + 1]; // query reads
@@ -3519,18 +3516,18 @@ int main_polishing(int argc, char *argv[])
 
 int main_polishing_test(int argc, char *argv[])
 {
-	pldat_t *h;
-	int c;
-	char *fn_out = 0;
+	pldat_t *h;		  // 存储Hi-C数据的处理状态及信息
+	int c;			  // 处理命令行参数
+	char *fn_out = 0; // 输出文件名
 
-	yak_copt_t opt;
+	yak_copt_t opt; // 存储命令行选项和参数的信息。这些结构体用于配置Hi-C数据的映射过程。
 	ketopt_t o = KETOPT_INIT;
-	yak_copt_init(&opt);
+	yak_copt_init(&opt); // 初始化结构体opt
 	opt.pre = YAK_COUNTER_BITS;
 	cout << "YAK_COUNTER_BITS: " << YAK_COUNTER_BITS << endl;
 	opt.n_thread = 32;
 	while ((c = ketopt(&o, argc, argv, 1, "k:p:K:t:b:H:o:m:", 0)) >= 0)
-	{
+	{ // 解析后续所有参数
 		if (c == 'k')
 			opt.k = atoi(o.arg);
 		else if (c == 'p')
@@ -3547,7 +3544,7 @@ int main_polishing_test(int argc, char *argv[])
 			opt.mapping = atoi(o.arg);
 	}
 	if (argc - o.ind < 1)
-	{
+	{ // 设置结构体opt变量，展示
 		// Test
 		fprintf(stderr, "main_polishing_test argc: %d\n", argc);
 		fprintf(stderr, "o.ind: %d\n", o.ind);
@@ -3560,7 +3557,6 @@ int main_polishing_test(int argc, char *argv[])
 		fprintf(stderr, "  -b INT     set Bloom filter size to 2**INT bits; 0 to disable [%d]\n", opt.bf_shift);
 		fprintf(stderr, "  -t INT     number of worker threads [%d]\n", opt.n_thread);
 		fprintf(stderr, "  -K INT     chunk size [100m]\n");
-		fprintf(stderr, "  -m INT     use haphic\n");
 		fprintf(stderr, "  -o FILE    save mapping relationship to FILE []\n");
 		fprintf(stderr, "Note: -b37 is recommended for human reads\n");
 		return 1;
@@ -3582,13 +3578,13 @@ int main_polishing_test(int argc, char *argv[])
 	char *ONT_ref1_contigs = argv[o.ind + 1]; // Hi-C reads 1
 	char *ONT_ref2_contigs = argv[o.ind + 2]; // Hi-C reads 2
 
-
+	// // 读取 GFA 文件
 	// asg_t *graph = gfa_read(gfa_filename);
 	// if (graph == NULL) {
 	//     fprintf(stderr, "ERROR: failed to read GFA file: %s\n", gfa_filename);
 	//     return 1;
 	// }
-
+	// 打开 reads 文件
 	// bseq_file_t *classpro_file = bseq_open(classpro_fn);
 	char *query_fn = argv[o.ind]; // query reads
 	bseq_file_t *hic_fn1 = bseq_open(ONT_ref1_contigs);
@@ -3621,18 +3617,10 @@ int main_poreC_map_test(int argc, char *argv[])
     opt.pre = YAK_COUNTER_BITS;
     opt.n_thread = 32;
     char *csv_filename = NULL;
-    bool show_help = false;
 
-    while ((c = ketopt(&o, argc, argv, 1, "hk:p:K:t:b:o:m:L:c:1:2:", 0)) >= 0)
+    while ((c = ketopt(&o, argc, argv, 1, "k:p:K:t:b:H:o:m:L:c:1:2:", 0)) >= 0)
     {
-        if (c == 'h')
-            show_help = true;
-        else if (c == '?' || c == ':')
-        {
-            fprintf(stderr, "[ERROR] Unknown or incomplete mapping option near argv[%d].\n", o.ind);
-            return 2;
-        }
-        else if (c == 'k')
+        if (c == 'k')
             opt.k = atoi(o.arg);
         else if (c == 'p')
             opt.pre = atoi(o.arg);
@@ -3656,24 +3644,22 @@ int main_poreC_map_test(int argc, char *argv[])
             hic_fn2_name = o.arg;
     }
 
-    if (show_help || argc - o.ind < 1 || !hic_fn1_name || !hic_fn2_name || !fn_out)
+    if (argc - o.ind < 1 || !hic_fn1_name || !hic_fn2_name)
     {
         fprintf(stderr, "Usage: HapFold mapping [options] -1 hic_reads_1 -2 hic_reads_2 -o mapping.txt utg.fa\n");
         fprintf(stderr, "Options:\n");
-        fprintf(stderr, "  -h         Show this help message\n");
-        fprintf(stderr, "  -1 FILE    Hi-C/Pore-C read 1 file (required)\n");
-        fprintf(stderr, "  -2 FILE    Hi-C/Pore-C read 2 file (required)\n");
-        fprintf(stderr, "  -o FILE    Mapping output path (required)\n");
-        fprintf(stderr, "  -k INT     K-mer size [%d]\n", opt.k);
-        fprintf(stderr, "  -p INT     Counter prefix length [%d]\n", opt.pre);
-        fprintf(stderr, "  -K INT     Input chunk size [100m]\n");
-        fprintf(stderr, "  -b INT     Bloom filter size as 2^INT bits; 0 disables it [%d]\n", opt.bf_shift);
-        fprintf(stderr, "  -t INT     Worker threads [%d]\n", opt.n_thread);
-        fprintf(stderr, "  -m INT     Mapping mode [%d]\n", opt.mapping);
-        fprintf(stderr, "  -L INT     Phasing model selector [%d]\n", opt.l);
-        fprintf(stderr, "  -c FILE    Optional node-type CSV file\n");
+        fprintf(stderr, "  -1 FILE    Hi-C read 1 file\n");
+        fprintf(stderr, "  -2 FILE    Hi-C read 2 file\n");
+        fprintf(stderr, "  -k INT     k-mer size [%d]\n", opt.k);
+        fprintf(stderr, "  -p INT     prefix length [%d]\n", opt.pre);
+        fprintf(stderr, "  -b INT     set Bloom filter size to 2**INT bits; 0 to disable [%d]\n", opt.bf_shift);
+        fprintf(stderr, "  -t INT     number of worker threads [%d]\n", opt.n_thread);
+        fprintf(stderr, "  -K INT     chunk size [100m]\n");
+        fprintf(stderr, "  -c FILE    input node_type CSV file\n");
+        fprintf(stderr, "  -L INT     use model for phasing\n");
+        fprintf(stderr, "  -o FILE    save mapping relationship to FILE []\n");
         fprintf(stderr, "Note: -b37 is recommended for human reads\n");
-        return show_help ? 0 : 1;
+        return 1;
     }
 
     if (opt.pre < YAK_COUNTER_BITS)

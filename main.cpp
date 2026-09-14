@@ -1,6 +1,6 @@
 // /*
 //  * HapFold - A graph-based haplotype reconstruction framework
-//  * Copyright (C) 2024 Yichen Li
+//  * Copyright (C) 2024 Yichen Li 
 //  *
 //  * This program is free software: you can redistribute it and/or modify
 //  * it under the terms of the GNU General Public License as published by
@@ -61,11 +61,11 @@
 // void Print_H(ps_opt_t *asm_opt)
 // {
 //     fprintf(stderr, "\nUsage: HapFold <command> [options]\n\n");
-
+    
 //     fprintf(stderr, "Commands:\n");
 //     fprintf(stderr, "    mapping       Map Hi-C/Pore-C reads to the unitig sequences\n");
 //     fprintf(stderr, "    scaffolding   Refine graph, phase haplotypes, and build scaffolds\n\n");
-
+    
 //     fprintf(stderr, "Global Options:\n");
 //     fprintf(stderr, "    -o FILE       prefix of output files/directory [%s]\n", asm_opt->output_file_name);
 //     fprintf(stderr, "    -t INT        number of threads [%d]\n", asm_opt->thread_num);
@@ -75,7 +75,7 @@
 //     fprintf(stderr, "Examples:\n");
 //     fprintf(stderr, "  Step 1. Hi-C/Pore-C Mapping:\n");
 //     fprintf(stderr, "    ./HapFold mapping -t 32 -1 hic_1.fq.gz -2 hic_2.fq.gz -o mapping.txt utg.fa\n\n");
-
+    
 //     fprintf(stderr, "  Step 2. Scaffolding (Graph refining & Phasing):\n");
 //     fprintf(stderr, "    ./HapFold scaffolding mapping.txt assembly.gfa out_dir -1 hap1.p_ctg.gfa -2 hap2.p_ctg.gfa -u utg_ctg.csv\n\n");
 // }
@@ -162,10 +162,10 @@
 //     g_params.n_chrs = -1;
 //     static ko_longopt_t longopts[] = {
 //         {"hic_scaffold_threshold_ratio", ko_required_argument, 301},
-//         {"debug", ko_no_argument, 302},
-
-
-//         {0, 0, 0}
+//         {"debug", ko_no_argument, 302}, 
+//         {"chain_len_thresh", ko_required_argument, 303},     // 对应 > 12M 参与迭代的阈值
+//         {"scaffold_len_thresh", ko_required_argument, 304},  // 对应 > 300K 直接输出的阈值
+//         {0, 0, 0} 
 //     };
 
 //     while ((c = ketopt(&o, argc, argv, 1, "t:e:i:f:1:2:u:c:n:pd", longopts)) >= 0)
@@ -188,15 +188,15 @@
 //             g_params.contig_hap_file = string(o.arg);
 //         else if (c == 'n')
 //             g_params.n_chrs = atoi(o.arg);
-//         // else if (c == 'p')
+//         // else if (c == 'p') 
 //         //     g_params.is_plant = true;
-//         else if (c == 'd' || c == 302)
+//         else if (c == 'd' || c == 302) 
 //             g_params.debug_mode = true;
-//         else if (c == 301)
+//         else if (c == 301) 
 //             g_params.hic_scaffold_threshold_ratio = atof(o.arg);
-
+//         else if (c == 303) // 捕获 12M 阈值
 //             g_params.chain_len_threshold = atoi(o.arg);
-
+//         else if (c == 304) // 捕获 300K 阈值
 //             g_params.scaffold_len_threshold = atoi(o.arg);
 //     }
 
@@ -213,8 +213,8 @@
 //         fprintf(stderr, "  -2 FILE     Path to haplotype 2 GFA file (*.hap2.p_ctg.gfa)\n");
 //         fprintf(stderr, "  -i BOOL     Enable identity check on contigs (true/false) [%s]\n", (g_params.check_identity ? "true" : "false"));
 //         fprintf(stderr, "  -f FILE     Precomputed identity file path; if omitted, check will run automatically [%s]\n", g_params.identityFile.c_str());
-//         // fprintf(stderr, "  -p          Enable plant mode (uses alternative phasing algorithms) [optional]\n");
-//         fprintf(stderr, "  -d, --debug Enable debug mode to run test code functions [optional]\n");
+//         // fprintf(stderr, "  -p          Enable plant mode (uses alternative phasing algorithms) [optional]\n"); 
+//         fprintf(stderr, "  -d, --debug Enable debug mode to run test code functions [optional]\n"); 
 //         fprintf(stderr, "  --hic_scaffold_threshold_ratio FLOAT  Threshold ratio for Hi-C scaffolding [%.2f]\n", g_params.hic_scaffold_threshold_ratio);
 //         fprintf(stderr, "  --chain_len_thresh INT                Length threshold to join contig_chain for iterative merging [%d]\n", g_params.chain_len_threshold);
 //         fprintf(stderr, "  --scaffold_len_thresh INT             Length threshold to directly output to scaffold.fa [%d]\n", g_params.scaffold_len_threshold);
@@ -272,7 +272,7 @@
 //     printf("start main\n");
 //     asg_t *graph = gfa_read(gfa_filename);
 //     map<uint32_t, map<uint32_t, set<uint32_t>>> *bubble_chain_graph = nullptr;
-
+    
 //     uint32_t **connections_foward;
 //     CALLOC(connections_foward, graph->n_seq);
 //     for (int i = 0; i < graph->n_seq; i++)
@@ -296,7 +296,7 @@
 //         connections_foward[i][j] = count_forward;
 //         connections_foward[j][i] = count_forward;
 //     }
-
+    
 //     std::string utg_gfa = std::string(gfa_filename);
 
 //     // if (g_params.is_plant)
@@ -309,7 +309,7 @@
 //         printf("[INFO] Default mode enabled. Using standard phasing functions.\n");
 //         bubble_chain_graph = phasing_10_7(graph, string(output_directory), connections_foward, connections_backward);
 
-
+        
 //         if (g_params.debug_mode) {
 //             printf("[INFO] Debug mode enabled. Executing get_haplotype_path_test_code...\n");
 //             get_haplotype_path_test_code(connections_foward, connections_backward, graph, bubble_chain_graph,
@@ -397,7 +397,6 @@ extern "C"
 #include <unistd.h>
 
 #include <fstream>
-#include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -408,60 +407,16 @@ extern "C"
 #include "phasing2scaffolding.h"
 #include "mapping.h"
 
-
+/*
+ * 注意这里使用完整相对路径，避免把整个 hifiasm 目录
+ * 加入 HapFold 的全局 include path。
+ */
 #include "hifiasm/hifiasm_entry.h"
 
-#define HapFold_VERSION "1.0"
+#define HapFold_VERSION "1.0.0"
 
 namespace hapfold
 {
-
-static bool normalize_fasta_headers(const std::string &path,
-                                    const std::string &prefix)
-{
-    std::ifstream input(path.c_str());
-    if (!input)
-        return false;
-
-    const std::string temporary_path = path + ".rename.tmp";
-    std::ofstream output(temporary_path.c_str(), std::ios::out | std::ios::trunc);
-    if (!output)
-        return false;
-
-    std::string line;
-    size_t sequence_id = 0;
-    while (std::getline(input, line))
-    {
-        if (!line.empty() && line[0] == '>')
-        {
-            ++sequence_id;
-            output << '>' << prefix << std::setw(2) << std::setfill('0')
-                   << sequence_id << '\n';
-        }
-        else
-        {
-            output << line << '\n';
-        }
-    }
-    input.close();
-    output.close();
-
-    if (!output)
-    {
-        unlink(temporary_path.c_str());
-        return false;
-    }
-    if (rename(temporary_path.c_str(), path.c_str()) != 0)
-    {
-        fprintf(stderr, "[ERROR] Cannot finalize normalized FASTA names for %s: %s\n",
-                path.c_str(), strerror(errno));
-        unlink(temporary_path.c_str());
-        return false;
-    }
-    fprintf(stderr, "[INFO] Renamed %zu sequences in %s using prefix '%s'.\n",
-            sequence_id, path.c_str(), prefix.c_str());
-    return true;
-}
 
 typedef struct
 {
@@ -471,7 +426,9 @@ typedef struct
     int thread_num;
 } ps_opt_t;
 
-
+/*
+ * 放在 hapfold namespace 以后，不再与 hifiasm 的 asm_opt 冲突。
+ */
 static ps_opt_t asm_opt;
 
 static void init_opt(ps_opt_t *opt)
@@ -493,7 +450,10 @@ static void destory_opt(ps_opt_t *opt)
     }
 }
 
-
+/*
+ * 你原来的 Print_H、mm_parse_num、
+ * read_named_bubble_contigs 等继续放在这里。
+ */
 
 std::vector<NamedBubbleContig> read_named_bubble_contigs(const std::string &filename)
 {
@@ -607,7 +567,6 @@ static int run_mcl_self_test()
     bool ok = run_pair_aware_mcl_scaffolding(
         chains, contacts, NULL, output_directory, params, fasta);
     fasta.close();
-    ok = ok && normalize_fasta_headers(output_directory + "/scaffold.fa", "scaffold");
 
     std::map<uint32_t, int> chain_cluster;
     std::ifstream clusters(output_directory + "/chromosome_clusters.tsv");
@@ -652,19 +611,6 @@ static int run_mcl_self_test()
                          chain_cluster[chains[i].index] == chain_cluster[chains[i + 1].index] &&
                          chain_scaffold[chains[i].index] != chain_scaffold[chains[i + 1].index];
 
-    std::ifstream normalized_fasta(output_directory + "/scaffold.fa");
-    size_t normalized_id = 0;
-    while (std::getline(normalized_fasta, line))
-    {
-        if (line.empty() || line[0] != '>')
-            continue;
-        ++normalized_id;
-        std::ostringstream expected;
-        expected << ">scaffold" << std::setw(2) << std::setfill('0') << normalized_id;
-        constraints_ok = constraints_ok && line == expected.str();
-    }
-    constraints_ok = constraints_ok && normalized_id != 0;
-
     for (size_t i = 0; i < endpoint_count; ++i) free(contacts[i]);
     free(contacts);
     for (contig_chains &chain : chains) delete chain.haplo_sequences;
@@ -678,161 +624,21 @@ static int run_mcl_self_test()
     return 0;
 }
 
-
-struct SyntheticTeloRecord
-{
-    std::string name;
-    uint64_t length = 0;
-    bool natural_start = false;
-    bool natural_end = false;
-};
-
-static bool has_terminal_repeat(const std::string &sequence,
-                                const std::string &motif,
-                                bool start)
-{
-    if (sequence.empty() || motif.empty()) return false;
-    const size_t edge = std::min<size_t>(2000, sequence.size());
-    const size_t offset = start ? 0 : sequence.size() - edge;
-    const std::string region = sequence.substr(offset, edge);
-    std::string reverse_motif = reverse_complement_seq(motif);
-    size_t count = 0;
-    for (size_t pos = 0; (pos = region.find(motif, pos)) != std::string::npos; pos += motif.size())
-        if (++count >= 3) return true;
-    count = 0;
-    for (size_t pos = 0; (pos = region.find(reverse_motif, pos)) != std::string::npos; pos += reverse_motif.size())
-        if (++count >= 3) return true;
-    return false;
-}
-
-static std::string synthetic_telomere_sequence(const std::string &motif, size_t bases)
-{
-    std::string sequence;
-    sequence.reserve(bases);
-    while (sequence.size() < bases) sequence += motif;
-    if (sequence.size() > bases) sequence.erase(bases);
-    return sequence;
-}
-
-static bool write_synthetic_telomere_ablation(const std::string &output_directory,
-                                              const GlobalParams &params)
-{
-    const std::string input_path = output_directory + "/scaffold.fa";
-    const std::string output_path = output_directory + "/scaffold.synthetic_telo.fa";
-    const std::string manifest_path = output_directory + "/synthetic_telomere_manifest.tsv";
-    std::ifstream input(input_path.c_str());
-    if (!input)
-    {
-        std::cerr << "[TELO::ERROR] Cannot open " << input_path << "\n";
-        return false;
-    }
-
-    std::vector<SyntheticTeloRecord> records;
-    std::string line, name, sequence;
-    auto collect = [&]() {
-        if (name.empty()) return;
-        SyntheticTeloRecord record;
-        record.name = name;
-        record.length = sequence.size();
-        record.natural_start = has_terminal_repeat(sequence, params.telo_motif, true);
-        record.natural_end = has_terminal_repeat(sequence, params.telo_motif, false);
-        records.push_back(record);
-    };
-    while (std::getline(input, line))
-    {
-        if (!line.empty() && line[0] == '>')
-        {
-            collect();
-            name = line.substr(1);
-            const size_t whitespace = name.find_first_of(" \t");
-            if (whitespace != std::string::npos) name.erase(whitespace);
-            sequence.clear();
-        }
-        else sequence += line;
-    }
-    collect();
-    input.close();
-
-    std::vector<size_t> order(records.size());
-    std::iota(order.begin(), order.end(), 0);
-    std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
-        if (records[a].length != records[b].length) return records[a].length > records[b].length;
-        return records[a].name < records[b].name;
-    });
-    std::unordered_set<std::string> force_top;
-    const size_t top_count = std::min<size_t>(std::max(0, params.n_chrs), order.size());
-    for (size_t rank = 0; rank < top_count; ++rank)
-        force_top.insert(records[order[rank]].name);
-
-    std::unordered_map<std::string, SyntheticTeloRecord> stats;
-    for (const auto &record : records) stats[record.name] = record;
-    const std::string padding = synthetic_telomere_sequence(params.telo_motif,
-                                                             params.synthetic_telomere_bp);
-    std::ofstream output(output_path.c_str(), std::ios::out | std::ios::trunc);
-    std::ofstream manifest(manifest_path.c_str(), std::ios::out | std::ios::trunc);
-    if (!output || !manifest) return false;
-    manifest << "sequence\tlength\ttop_n\tnatural_start\tnatural_end\tadded_start\tadded_end\treason\n";
-
-    input.open(input_path.c_str());
-    name.clear();
-    sequence.clear();
-    auto emit = [&]() {
-        if (name.empty()) return;
-        const auto found = stats.find(name);
-        if (found == stats.end()) return;
-        const SyntheticTeloRecord &record = found->second;
-        const bool is_top = force_top.count(name) != 0;
-        const bool eligible_extra = !is_top && record.length >= params.telo_extra_min_length &&
-                                    (record.natural_start != record.natural_end);
-        // Top-N is deliberately unconditional: append a full diagnostic
-        // repeat tract at both ends so the ablation is independent of this
-        // lightweight selector versus NCRF sensitivity.  Extra sequences are
-        // completed only on their missing end.
-        const bool add_start = is_top || (eligible_extra && !record.natural_start);
-        const bool add_end = is_top || (eligible_extra && !record.natural_end);
-        output << ">" << name << " synthetic_telomere_ablation=1"
-               << " added_start=" << add_start << " added_end=" << add_end << "\n";
-        if (add_start) output << padding;
-        output << sequence;
-        if (add_end) output << padding;
-        output << "\n";
-        manifest << name << "\t" << record.length << "\t" << is_top << "\t"
-                 << record.natural_start << "\t" << record.natural_end << "\t"
-                 << add_start << "\t" << add_end << "\t"
-                 << (is_top ? "top_n_length" : (eligible_extra ? "one_natural_end_and_min_length" : "not_modified"))
-                 << "\n";
-    };
-    while (std::getline(input, line))
-    {
-        if (!line.empty() && line[0] == '>')
-        {
-            emit();
-            name = line.substr(1);
-            const size_t whitespace = name.find_first_of(" \t");
-            if (whitespace != std::string::npos) name.erase(whitespace);
-            sequence.clear();
-        }
-        else sequence += line;
-    }
-    emit();
-    std::cerr << "[TELO] Wrote diagnostic-only synthetic telomere ablation: "
-              << output_path << "; original scaffold.fa unchanged; top_n=" << top_count << "\n";
-    return static_cast<bool>(output) && static_cast<bool>(manifest);
-}
-
+/*
+ * 原来的函数内容保持不变。
+ */
 int main_phasing_scaffolding(int argc, char *argv[])
 {
     ketopt_t o = KETOPT_INIT;
     int c;
-    bool show_help = false;
 
     GlobalParams g_params;
     g_params.n_chrs = -1;
     static ko_longopt_t longopts[] = {
         {"hic_scaffold_threshold_ratio", ko_required_argument, 301},
-        {"debug", ko_no_argument, 302},
-        {"chain_len_thresh", ko_required_argument, 303},
-        {"scaffold_len_thresh", ko_required_argument, 304},
+        {"debug", ko_no_argument, 302}, 
+        {"chain_len_thresh", ko_required_argument, 303},     // 对应 > 12M 参与迭代的阈值
+        {"scaffold_len_thresh", ko_required_argument, 304},  // 对应 > 300K 直接输出的阈值
         {"global-scaffolding", ko_required_argument, 305},
         {"paired-global-merge", ko_required_argument, 306},
         {"mcl-inflation", ko_required_argument, 307},
@@ -840,28 +646,11 @@ int main_phasing_scaffolding(int argc, char *argv[])
         {"paired-merge-min-confidence", ko_required_argument, 309},
         {"component-seed-boost", ko_required_argument, 310},
         {"split-chain-list", ko_required_argument, 311},
-        {"auto-chain-correction", ko_no_argument, 312},
-        {"auto-chain-correction-mode", ko_required_argument, 313},
-        {"auto-chain-min-links", ko_required_argument, 314},
-        {"auto-chain-min-confidence", ko_required_argument, 315},
-        {"auto-chain-min-components", ko_required_argument, 316},
-        {"telo", ko_no_argument, 317},
-        {"telo-motif", ko_required_argument, 318},
-        {"telo-extra-min-length", ko_required_argument, 319},
-        {"allow-split-chain-rejoin", ko_no_argument, 320},
-        {"forced-chain-links", ko_required_argument, 321},
-        {"telo-bases", ko_required_argument, 322},
-        {"help", ko_no_argument, 'h'},
-        {0, 0, 0}
+        {0, 0, 0} 
     };
 
-    while ((c = ketopt(&o, argc, argv, 1, "ht:e:i:f:1:2:u:c:n:pd", longopts)) >= 0)
+    while ((c = ketopt(&o, argc, argv, 1, "t:e:i:f:1:2:u:c:n:pd", longopts)) >= 0)
     {
-        if (c == '?' || c == ':')
-        {
-            fprintf(stderr, "[ERROR] Unknown, ambiguous, or incomplete scaffolding option near argv[%d].\n", o.ind);
-            return 2;
-        }
         if (c == 't')
             g_params.n_threads = atoi(o.arg);
         else if (c == 'e')
@@ -880,15 +669,15 @@ int main_phasing_scaffolding(int argc, char *argv[])
             g_params.contig_hap_file = string(o.arg);
         else if (c == 'n')
             g_params.n_chrs = atoi(o.arg);
-        // else if (c == 'p')
+        // else if (c == 'p') 
         //     g_params.is_plant = true;
-        else if (c == 'd' || c == 302)
+        else if (c == 'd' || c == 302) 
             g_params.debug_mode = true;
-        else if (c == 301)
+        else if (c == 301) 
             g_params.hic_scaffold_threshold_ratio = atof(o.arg);
-        else if (c == 303)
+        else if (c == 303) // 捕获 12M 阈值
             g_params.chain_len_threshold = atoi(o.arg);
-        else if (c == 304)
+        else if (c == 304) // 捕获 300K 阈值
             g_params.scaffold_len_threshold = atoi(o.arg);
         else if (c == 305)
             g_params.global_scaffolding_mode = string(o.arg);
@@ -904,37 +693,12 @@ int main_phasing_scaffolding(int argc, char *argv[])
             g_params.component_seed_boost = atof(o.arg);
         else if (c == 311)
             g_params.split_chain_list = string(o.arg);
-        else if (c == 312)
-            g_params.auto_chain_correction = true;
-        else if (c == 313)
-            g_params.auto_chain_correction_mode = string(o.arg);
-        else if (c == 314)
-            g_params.auto_chain_min_links = strtoul(o.arg, NULL, 10);
-        else if (c == 315)
-            g_params.auto_chain_min_confidence = atof(o.arg);
-        else if (c == 316)
-            g_params.auto_chain_min_components = strtoul(o.arg, NULL, 10);
-        else if (c == 317)
-            g_params.synthetic_telomere_ablation = true;
-        else if (c == 318)
-            g_params.telo_motif = string(o.arg);
-        else if (c == 319)
-            g_params.telo_extra_min_length = strtoull(o.arg, NULL, 10);
-        else if (c == 320)
-            g_params.allow_split_chain_rejoin = true;
-        else if (c == 321)
-            g_params.forced_chain_links = string(o.arg);
-        else if (c == 322)
-            g_params.synthetic_telomere_bp = strtoul(o.arg, NULL, 10);
-        else if (c == 'h')
-            show_help = true;
     }
 
-    if (show_help || argc - o.ind < 3)
+    if (argc - o.ind < 3)
     {
         fprintf(stderr, "\nUsage: HapFold scaffolding [options] <mapping.txt> <assembly.gfa> <output_dir> -1 *.hap1.p_ctg.gfa -2 *.hap2.p_ctg.gfa -n chr_number\n\n");
         fprintf(stderr, "Options:\n");
-        fprintf(stderr, "  -h, --help Show this help message\n");
         fprintf(stderr, "  -t INT      Number of threads [%d]\n", g_params.n_threads);
         fprintf(stderr, "  -n INT      Expected number of chromosomes (e.g., 78 for chicken) [%d]\n", g_params.n_chrs);
         fprintf(stderr, "  -e STR      Restriction enzymes separated by comma (e.g., GATC,GANTC) [%s]\n", g_params.enzymes_unsplit.c_str());
@@ -944,8 +708,8 @@ int main_phasing_scaffolding(int argc, char *argv[])
         fprintf(stderr, "  -2 FILE     Path to haplotype 2 GFA file (*.hap2.p_ctg.gfa)\n");
         fprintf(stderr, "  -i BOOL     Enable identity check on contigs (true/false) [%s]\n", (g_params.check_identity ? "true" : "false"));
         fprintf(stderr, "  -f FILE     Precomputed identity file path; if omitted, check will run automatically [%s]\n", g_params.identityFile.c_str());
-        // fprintf(stderr, "  -p          Enable plant mode (uses alternative phasing algorithms) [optional]\n");
-        fprintf(stderr, "  -d, --debug Enable debug mode to run test code functions [optional]\n");
+        // fprintf(stderr, "  -p          Enable plant mode (uses alternative phasing algorithms) [optional]\n"); 
+        fprintf(stderr, "  -d, --debug Enable debug mode to run test code functions [optional]\n"); 
         fprintf(stderr, "  --hic_scaffold_threshold_ratio FLOAT  Threshold ratio for Hi-C scaffolding [%.2f]\n", g_params.hic_scaffold_threshold_ratio);
         fprintf(stderr, "  --chain_len_thresh INT                Length threshold to join contig_chain for iterative merging [%d]\n", g_params.chain_len_threshold);
         fprintf(stderr, "  --scaffold_len_thresh INT             Length threshold to directly output to scaffold.fa [%d]\n", g_params.scaffold_len_threshold);
@@ -956,25 +720,9 @@ int main_phasing_scaffolding(int argc, char *argv[])
         fprintf(stderr, "  --paired-merge-min-confidence FLOAT   Best/second-best endpoint ratio [%.2f]\n", g_params.paired_merge_min_confidence);
         fprintf(stderr, "  --component-seed-boost FLOAT          Soft within-component multiplier [%.2f]\n", g_params.component_seed_boost);
         fprintf(stderr, "  --split-chain-list FILE               First-contig or internal chain IDs to restore as source contigs\n");
-        fprintf(stderr, "  --allow-split-chain-rejoin            Allow explicitly restored source contigs to compete in global scaffolding\n");
-        fprintf(stderr, "  --forced-chain-links FILE             Diagnostic whitelist of chain-name pairs for global joining\n");
-        fprintf(stderr, "  --auto-chain-correction               Detect weak/conflicting local-chain joins before global scaffolding\n");
-        fprintf(stderr, "  --auto-chain-correction-mode STR      conservative (AND) or aggressive (OR) [conservative]\n");
-        fprintf(stderr, "  --auto-chain-min-links INT            Minimum raw links at a chain junction [%u]\n", g_params.auto_chain_min_links);
-        fprintf(stderr, "  --auto-chain-min-confidence FLOAT     Junction/best-alternative ratio [%.2f]\n", g_params.auto_chain_min_confidence);
-        fprintf(stderr, "  --auto-chain-min-components INT       Minimum components in a tested chain [%u]\n", g_params.auto_chain_min_components);
-        fprintf(stderr, "  --telo                                 Write a separate diagnostic synthetic-telomere ablation FASTA; never overwrites scaffold.fa\n");
-        fprintf(stderr, "  --telo-motif STR                       Motif used by --telo [%s]\n", g_params.telo_motif.c_str());
-        fprintf(stderr, "  --telo-bases INT                       Synthetic repeat length per added end [%u]\n", g_params.synthetic_telomere_bp);
-        fprintf(stderr, "  --telo-extra-min-length INT            Also complete one-ended sequences at least this long [%llu]\n", (unsigned long long)g_params.telo_extra_min_length);
         fprintf(stderr, "\n");
-        return show_help ? 0 : 1;
+        return 1;
     }
-
-    fprintf(stderr, "[INFO] Telomere ablation: enabled=%s motif=%s bases=%u top_n=%d extra_min_length=%llu\n",
-            g_params.synthetic_telomere_ablation ? "true" : "false",
-            g_params.telo_motif.c_str(), g_params.synthetic_telomere_bp,
-            g_params.n_chrs, (unsigned long long)g_params.telo_extra_min_length);
 
     // vector<string> enzymes;
     // if (g_params.enzymes_unsplit.size() > 1)
@@ -1023,17 +771,9 @@ int main_phasing_scaffolding(int argc, char *argv[])
         fprintf(stderr, "[ERROR] -1 <hap1.p_ctg.gfa>, -2 <hap2.p_ctg.gfa>, and -n <chr_number> are required for UTG-CTG mapping and phasing.\n");
         return 1;
     }
-    if (g_params.global_scaffolding_mode != "mcl" &&
-        g_params.global_scaffolding_mode != "haphic" &&
-        g_params.global_scaffolding_mode != "legacy")
+    if (g_params.global_scaffolding_mode != "mcl" && g_params.global_scaffolding_mode != "legacy")
     {
-        fprintf(stderr, "[ERROR] --global-scaffolding must be haphic, mcl or legacy.\n");
-        return 1;
-    }
-    if (g_params.auto_chain_correction_mode != "conservative" &&
-        g_params.auto_chain_correction_mode != "aggressive")
-    {
-        fprintf(stderr, "[ERROR] --auto-chain-correction-mode must be conservative or aggressive.\n");
+        fprintf(stderr, "[ERROR] --global-scaffolding must be mcl or legacy.\n");
         return 1;
     }
     if (g_params.paired_global_merge != "off" &&
@@ -1043,15 +783,10 @@ int main_phasing_scaffolding(int argc, char *argv[])
         fprintf(stderr, "[ERROR] --paired-global-merge must be off, supported or inferred.\n");
         return 1;
     }
-    if (g_params.synthetic_telomere_ablation && g_params.synthetic_telomere_bp == 0)
-    {
-        fprintf(stderr, "[ERROR] --telo-bases must be greater than zero when --telo is enabled.\n");
-        return 1;
-    }
     printf("start main\n");
     asg_t *graph = gfa_read(gfa_filename);
     map<uint32_t, map<uint32_t, set<uint32_t>>> *bubble_chain_graph = nullptr;
-
+    
     uint32_t **connections_foward;
     CALLOC(connections_foward, graph->n_seq);
     for (int i = 0; i < graph->n_seq; i++)
@@ -1068,30 +803,14 @@ int main_phasing_scaffolding(int argc, char *argv[])
     }
     ifstream infile(connectionFile);
     uint32_t i, j, count_forward, count_backward;
-    std::string mapping_line;
-    while (std::getline(infile, mapping_line))
+    while (infile >> i >> j >> count_backward >> count_forward)
     {
-        if (mapping_line.empty() || mapping_line[0] == '#') continue;
-        std::istringstream mapping_fields(mapping_line);
-        // HapFold mapping writer schema: unitig_i, unitig_j, forward, backward.
-        // The previous reader accidentally exchanged the last two columns.
-        if (!(mapping_fields >> i >> j >> count_forward >> count_backward))
-        {
-            fprintf(stderr, "[ERROR] Invalid mapping row: %s\n", mapping_line.c_str());
-            return 1;
-        }
-        if (i >= graph->n_seq || j >= graph->n_seq)
-        {
-            fprintf(stderr, "[ERROR] Mapping unitig index out of range: %u %u (n=%u)\n",
-                    i, j, graph->n_seq);
-            return 1;
-        }
         connections_backward[i][j] = count_backward;
         connections_backward[j][i] = count_backward;
         connections_foward[i][j] = count_forward;
         connections_foward[j][i] = count_forward;
     }
-
+    
     std::string utg_gfa = std::string(gfa_filename);
 
     // if (g_params.is_plant)
@@ -1104,7 +823,7 @@ int main_phasing_scaffolding(int argc, char *argv[])
         printf("[INFO] Default mode enabled. Using standard phasing functions.\n");
         bubble_chain_graph = phasing_10_7(graph, string(output_directory), connections_foward, connections_backward);
 
-
+        
         if (g_params.debug_mode) {
             printf("[INFO] Debug mode enabled. Executing get_haplotype_path_test_code...\n");
             get_haplotype_path_test_code(connections_foward, connections_backward, graph, bubble_chain_graph,
@@ -1113,19 +832,6 @@ int main_phasing_scaffolding(int argc, char *argv[])
             printf("[INFO] Executing standard model get_haplotype_path_now...\n");
             get_haplotype_path_now(connections_foward, connections_backward, graph, bubble_chain_graph,
                                    output_directory, named_bubble_contigs, gfa_filename, g_params);
-        }
-        const std::string output_prefix(output_directory);
-        if (!normalize_fasta_headers(output_prefix + "/scaffold.fa", "scaffold") ||
-            !normalize_fasta_headers(output_prefix + "/hap_contig.fa", "contig"))
-        {
-            fprintf(stderr, "[ERROR] Failed to normalize final FASTA sequence names.\n");
-            return 1;
-        }
-        if (g_params.synthetic_telomere_ablation &&
-            !write_synthetic_telomere_ablation(string(output_directory), g_params))
-        {
-            fprintf(stderr, "[TELO::ERROR] Synthetic telomere ablation output failed.\n");
-            return 1;
         }
     // }
     return 0;
@@ -1258,19 +964,6 @@ static bool require_file(const std::string &path, const char *description)
     return false;
 }
 
-static bool require_file_list(const std::string &paths, const char *description)
-{
-    std::istringstream input(paths);
-    std::string path;
-    bool any = false;
-    while (std::getline(input, path, ','))
-    {
-        any = true;
-        if (!require_file(path, description)) return false;
-    }
-    return any;
-}
-
 static bool gfa_to_fasta(const std::string &gfa_path,
                          const std::string &fasta_path)
 {
@@ -1365,17 +1058,12 @@ static void print_run_help()
             "      --hic_scaffold_threshold_ratio FLOAT\n"
             "      --chain_len_thresh INT\n"
             "      --scaffold_len_thresh INT\n"
-            "      --global-scaffolding haphic|mcl|legacy [mcl]\n"
+            "      --global-scaffolding mcl|legacy [mcl]\n"
             "      --paired-global-merge off|supported|inferred [supported]\n"
             "      --mcl-inflation FLOAT [automatic scan]\n"
             "      --paired-merge-min-links INT [100]\n"
             "      --paired-merge-min-confidence FLOAT [1.5]\n"
             "      --component-seed-boost FLOAT [1.2]\n\n"
-            "      --auto-chain-correction\n"
-            "      --auto-chain-correction-mode conservative|aggressive\n"
-            "      --auto-chain-min-links INT [20]\n"
-            "      --auto-chain-min-confidence FLOAT [0.35]\n"
-            "      --auto-chain-min-components INT [2]\n\n"
             "Example:\n"
             "  HapFold run -1 hic.R1.fq.gz -2 hic.R2.fq.gz -n 46 -t 32 \\\n"
             "    -o result/asm --high-quality-utg -- hifi.fq.gz\n\n");
@@ -1385,7 +1073,11 @@ int run_pipeline(int argc, char *argv[])
 {
     int separator_index = -1;
 
-
+    /*
+     * 此时：
+     *
+     * argv[0] = "run"
+     */
     for (int i = 1; i < argc; ++i)
     {
         if (strcmp(argv[i], "--") == 0)
@@ -1419,8 +1111,6 @@ int run_pipeline(int argc, char *argv[])
     std::string hic_threshold, chain_threshold, scaffold_threshold;
     std::string global_scaffolding, paired_global_merge, mcl_inflation;
     std::string paired_merge_min_links, paired_merge_min_confidence, component_seed_boost;
-    std::string auto_chain_mode, auto_chain_min_links;
-    std::string auto_chain_min_confidence, auto_chain_min_components;
     std::string hifiasm_mode = "hic";
     std::string hifiasm_hap1_yak, hifiasm_hap2_yak;
     int threads = 32;
@@ -1428,7 +1118,6 @@ int run_pipeline(int argc, char *argv[])
     bool debug_mode = false;
     bool high_quality_utg = false;
     bool keep_hifiasm_output = false;
-    bool auto_chain_correction = false;
 
     for (int i = 1; i < separator_index; ++i)
     {
@@ -1451,11 +1140,6 @@ int run_pipeline(int argc, char *argv[])
         if (arg == "--keep-hifiasm-output")
         {
             keep_hifiasm_output = true;
-            continue;
-        }
-        if (arg == "--auto-chain-correction")
-        {
-            auto_chain_correction = true;
             continue;
         }
 
@@ -1494,10 +1178,6 @@ int run_pipeline(int argc, char *argv[])
         else if (arg == "--paired-merge-min-links") paired_merge_min_links = value;
         else if (arg == "--paired-merge-min-confidence") paired_merge_min_confidence = value;
         else if (arg == "--component-seed-boost") component_seed_boost = value;
-        else if (arg == "--auto-chain-correction-mode") auto_chain_mode = value;
-        else if (arg == "--auto-chain-min-links") auto_chain_min_links = value;
-        else if (arg == "--auto-chain-min-confidence") auto_chain_min_confidence = value;
-        else if (arg == "--auto-chain-min-components") auto_chain_min_components = value;
         else
         {
             fprintf(stderr, "[ERROR] Unknown run option: %s\n", arg.c_str());
@@ -1514,8 +1194,8 @@ int run_pipeline(int argc, char *argv[])
         print_run_help();
         return 1;
     }
-    if (!require_file_list(hic1, "Hi-C read 1") ||
-        !require_file_list(hic2, "Hi-C read 2"))
+    if (!require_file(hic1, "Hi-C read 1") ||
+        !require_file(hic2, "Hi-C read 2"))
         return 1;
     if (hifiasm_mode != "default" &&
         hifiasm_mode != "trio" &&
@@ -1571,9 +1251,6 @@ int run_pipeline(int argc, char *argv[])
         }
         native_hifiasm_args.push_back(arg);
     }
-    const bool hybrid_single_pass_mapping =
-        std::find(native_hifiasm_args.begin(), native_hifiasm_args.end(),
-                  "--hybrid-hic-mapping") != native_hifiasm_args.end();
 
     if (output_dir.empty())
         output_dir = output_prefix + ".hapfold";
@@ -1592,9 +1269,7 @@ int run_pipeline(int argc, char *argv[])
         keep_hifiasm_output ? output_prefix : hifiasm_work_dir + "/asm";
 
     if (mapping_output.empty())
-        mapping_output = hybrid_single_pass_mapping
-                             ? hifiasm_output_prefix + ".hic.hapfold.mapping.tsv"
-                             : output_dir + "/mapping.txt";
+        mapping_output = output_dir + "/mapping.txt";
     if (utg_fasta.empty())
         utg_fasta = work_dir + "/p_utg.fa";
 
@@ -1712,37 +1387,39 @@ int run_pipeline(int argc, char *argv[])
         return 1;
     }
 
-    const std::string threads_string = std::to_string(threads);
-    if (hybrid_single_pass_mapping)
+    if (!gfa_to_fasta(utg_gfa, utg_fasta))
     {
-        fprintf(stderr,
-                "[M::run_pipeline] Reusing hifiasm hybrid mapping; no second mapping pass -> %s\n",
-                mapping_output.c_str());
+        report_preserved_work();
+        return 1;
     }
-    else
+
+    const std::string threads_string = std::to_string(threads);
+    std::vector<std::string> mapping_storage;
+    mapping_storage.push_back("mapping");
+    mapping_storage.push_back("-t");
+    mapping_storage.push_back(threads_string);
+    mapping_storage.push_back("-1");
+    mapping_storage.push_back(hic1);
+    mapping_storage.push_back("-2");
+    mapping_storage.push_back(hic2);
+    mapping_storage.push_back("-o");
+    mapping_storage.push_back(mapping_output);
+    mapping_storage.push_back(utg_fasta);
+
+    std::vector<char *> mapping_argv;
+    for (size_t i = 0; i < mapping_storage.size(); ++i)
+        mapping_argv.push_back(const_cast<char *>(mapping_storage[i].c_str()));
+    mapping_argv.push_back(nullptr);
+
+    fprintf(stderr, "[M::run_pipeline] Starting mapping -> %s\n",
+            mapping_output.c_str());
+    ret = mapping_entry(static_cast<int>(mapping_storage.size()),
+                        mapping_argv.data());
+    if (ret != 0)
     {
-        if (!gfa_to_fasta(utg_gfa, utg_fasta))
-        {
-            report_preserved_work();
-            return 1;
-        }
-        std::vector<std::string> mapping_storage = {
-            "mapping", "-t", threads_string, "-1", hic1, "-2", hic2,
-            "-o", mapping_output, utg_fasta};
-        std::vector<char *> mapping_argv;
-        for (size_t i = 0; i < mapping_storage.size(); ++i)
-            mapping_argv.push_back(const_cast<char *>(mapping_storage[i].c_str()));
-        mapping_argv.push_back(nullptr);
-        fprintf(stderr, "[M::run_pipeline] Starting mapping -> %s\n",
-                mapping_output.c_str());
-        ret = mapping_entry(static_cast<int>(mapping_storage.size()),
-                            mapping_argv.data());
-        if (ret != 0)
-        {
-            fprintf(stderr, "[ERROR] Mapping failed with exit code %d\n", ret);
-            report_preserved_work();
-            return ret;
-        }
+        fprintf(stderr, "[ERROR] Mapping failed with exit code %d\n", ret);
+        report_preserved_work();
+        return ret;
     }
     if (!require_file(mapping_output, "mapping output"))
     {
@@ -1814,24 +1491,6 @@ int run_pipeline(int argc, char *argv[])
         scaffold_storage.push_back("--component-seed-boost");
         scaffold_storage.push_back(component_seed_boost);
     }
-    if (auto_chain_correction)
-        scaffold_storage.push_back("--auto-chain-correction");
-    if (!auto_chain_mode.empty()) {
-        scaffold_storage.push_back("--auto-chain-correction-mode");
-        scaffold_storage.push_back(auto_chain_mode);
-    }
-    if (!auto_chain_min_links.empty()) {
-        scaffold_storage.push_back("--auto-chain-min-links");
-        scaffold_storage.push_back(auto_chain_min_links);
-    }
-    if (!auto_chain_min_confidence.empty()) {
-        scaffold_storage.push_back("--auto-chain-min-confidence");
-        scaffold_storage.push_back(auto_chain_min_confidence);
-    }
-    if (!auto_chain_min_components.empty()) {
-        scaffold_storage.push_back("--auto-chain-min-components");
-        scaffold_storage.push_back(auto_chain_min_components);
-    }
     scaffold_storage.push_back(mapping_output);
     scaffold_storage.push_back(utg_gfa);
     scaffold_storage.push_back(output_dir);
@@ -1890,7 +1549,9 @@ static void print_main_help()
 } // namespace hapfold
 
 
-
+/*
+ * 整个项目中唯一真正的 main。
+ */
 int main(int argc, char *argv[])
 {
     extern double yak_realtime(void);
@@ -1900,19 +1561,24 @@ int main(int argc, char *argv[])
     int ret = 0;
     int i = 0;
 
-    if (argc == 1 || strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0)
+    if (argc == 1)
     {
         hapfold::print_main_help();
         return 1;
     }
 
-
+    /*
+     * hifiasm 自己会完成 timer reset 和日志输出。
+     * 因此这里直接返回，不再进入 HapFold 的通用计时部分。
+     */
     if (strcmp(argv[1], "hifiasm") == 0)
     {
         return ::hifiasm_main(argc - 1, argv + 1);
     }
 
-
+    /*
+     * 第一版 run 内部先调用一次 hifiasm。
+     */
     if (strcmp(argv[1], "run") == 0)
     {
         return hapfold::run_pipeline(argc - 1, argv + 1);

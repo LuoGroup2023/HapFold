@@ -16,7 +16,11 @@ int hifiasm_main(int argc, char *argv[])
 
     init_opt(&asm_opt);
 
-
+    /*
+     * hifiasm 原有参数解析逻辑保持不变。
+     * --help、--version 或参数不足时，CommandLine_process()
+     * 可能返回 false。
+     */
     const int parse_result = CommandLine_process(argc, argv, &asm_opt);
     if (parse_result <= 0)
     {
@@ -64,7 +68,13 @@ int hifiasm_main(int argc, char *argv[])
     return ret;
 }
 
-
+/*
+ * 编译原始独立 hifiasm 时定义：
+ *
+ *     -DHIFIASM_STANDALONE
+ *
+ * 集成进 HapFold 时不定义该宏，因此最终只有一个 main。
+ */
 #ifdef HIFIASM_STANDALONE
 
 int main(int argc, char *argv[])
