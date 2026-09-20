@@ -1,0 +1,49 @@
+# Build products
+/HapFold
+/build/
+*.o
+*.a.d
+*.so
+*.d
+
+# Runtime and assembly outputs
+*.bin
+*.gfa
+*.fa
+*.fasta
+*.fastq
+*.fq
+*.gz
+*.bam
+*.sam
+*.paf
+*.log
+*.out
+*.err
+*.time.txt
+*.hapfold/
+*.hapfold-work/
+
+# Local benchmark and development material
+/test/
+/final_benchmark_results_*/
+/final_benchmark_figures_*/
+/versions/
+/docs/
+/.agents/
+/.codex/
+/__pycache__/
+*.pyc
+/run_hg002_qv_remote.sh
+/sitecustomize.py
+/scripts/eval.py
+/scripts/eval.sh
+/scripts/gene_annote.py
+/scripts/porec2hic.cpp
+/scripts/porec2hic_bam_fast
+
+# Editors and operating systems
+.DS_Store
+*~
+.idea/
+.vscode/
